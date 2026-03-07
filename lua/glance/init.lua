@@ -175,6 +175,11 @@ function M.setup_treesitter()
       end
     end
   end
+
+  -- In --clean mode, plugin/ files aren't sourced, so nvim-treesitter's
+  -- filetype-to-language registrations (e.g. typescriptreact -> tsx) don't
+  -- happen automatically. Requiring parsers triggers those register() calls.
+  pcall(require, 'nvim-treesitter.parsers')
 end
 
 return M

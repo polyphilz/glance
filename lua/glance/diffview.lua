@@ -36,18 +36,30 @@ function M.open(file)
   vim.api.nvim_set_current_win(filetree.win)
   vim.cmd('rightbelow vnew')
   M.old_win = vim.api.nvim_get_current_win()
-  M.old_buf = vim.api.nvim_get_current_buf()
+  local scratch_buf = vim.api.nvim_get_current_buf()
   M.set_win_options(M.old_win)
 
-  -- Set up old buffer
-  local old_name = 'glance://old/' .. file.path
-  pcall(vim.api.nvim_buf_set_name, M.old_buf, old_name)
-  vim.api.nvim_buf_set_lines(M.old_buf, 0, -1, false, old_lines)
+  -- Set up old buffer: write to temp file with correct extension so
+  -- syntax highlighting works identically to the right pane via edit
+  local ext = vim.fn.fnamemodify(file.path, ':e')
+  local tmpfile = vim.fn.tempname() .. '.' .. ext
+  local f = io.open(tmpfile, 'w')
+  if f then
+    f:write(table.concat(old_lines, '\n'))
+    f:close()
+  end
+  vim.cmd('edit ' .. vim.fn.fnameescape(tmpfile))
+  M.old_buf = vim.api.nvim_get_current_buf()
+  vim.fn.delete(tmpfile)
+  -- Clean up the scratch buffer vnew created
+  if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= M.old_buf then
+    vim.api.nvim_buf_delete(scratch_buf, { force = true })
+  end
+  -- Make it read-only and non-saveable
   vim.api.nvim_buf_set_option(M.old_buf, 'buftype', 'nofile')
   vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', false)
   vim.api.nvim_buf_set_option(M.old_buf, 'readonly', true)
   vim.api.nvim_buf_set_option(M.old_buf, 'swapfile', false)
-  M.set_filetype_from_path(M.old_buf, file.path)
 
   -- Create the new (right) pane: vertical split to the right of old pane
   vim.cmd('rightbelow vnew')
@@ -394,10 +406,14 @@ function M.set_win_options(win)
 end
 
 --- Set the filetype of a buffer based on the file extension for syntax highlighting.
+--- Also explicitly starts tree-sitter, which doesn't auto-attach to nofile buffers.
 function M.set_filetype_from_path(buf, path)
   local ft = vim.filetype.match({ filename = path })
   if ft then
     vim.api.nvim_buf_set_option(buf, 'filetype', ft)
+    -- Don't pass ft as lang; let treesitter resolve via get_lang()
+    -- which handles filetype != parser name (e.g. typescriptreact -> tsx)
+    pcall(vim.treesitter.start, buf)
   end
 end
 
