@@ -133,10 +133,16 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, '@tag.attribute', { fg = func })
 
   -- Diff highlights
-  vim.api.nvim_set_hl(0, 'DiffAdd', { bg = '#1a3d1a' })     -- added lines: green
-  vim.api.nvim_set_hl(0, 'DiffDelete', { bg = '#3d1a1a' })   -- deleted lines: red
-  vim.api.nvim_set_hl(0, 'DiffChange', { bg = '#2b2b00' })   -- changed lines: dim yellow
-  vim.api.nvim_set_hl(0, 'DiffText', { bg = '#4a4a00', bold = true }) -- changed text: bright yellow
+  vim.api.nvim_set_hl(0, 'DiffAdd', { bg = '#1a3d1a' })
+  vim.api.nvim_set_hl(0, 'DiffDelete', { bg = '#3d1a1a' })
+  vim.api.nvim_set_hl(0, 'DiffChange', { bg = '#2b2b00' })
+  vim.api.nvim_set_hl(0, 'DiffText', { bg = '#4a4a00', bold = true })
+
+  -- Per-pane diff highlights (old=red, new=green) applied via winhighlight
+  vim.api.nvim_set_hl(0, 'GlanceDiffChangeOld', { bg = '#3d1a1a' })
+  vim.api.nvim_set_hl(0, 'GlanceDiffTextOld', { bg = '#6b2c2c', bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceDiffChangeNew', { bg = '#1a3d1a' })
+  vim.api.nvim_set_hl(0, 'GlanceDiffTextNew', { bg = '#2b6b2b', bold = true })
 
   -- File tree highlights
   vim.api.nvim_set_hl(0, 'GlanceSectionHeader', { bold = true, fg = comment })

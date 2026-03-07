@@ -83,6 +83,12 @@ function M.open(file)
   vim.api.nvim_win_set_option(M.old_win, 'foldenable', false)
   vim.api.nvim_win_set_option(M.new_win, 'foldenable', false)
 
+  -- Per-pane diff colors: old=red tones, new=green tones (like VS Code/Cursor)
+  vim.api.nvim_win_set_option(M.old_win, 'winhighlight',
+    'DiffChange:GlanceDiffChangeOld,DiffText:GlanceDiffTextOld')
+  vim.api.nvim_win_set_option(M.new_win, 'winhighlight',
+    'DiffChange:GlanceDiffChangeNew,DiffText:GlanceDiffTextNew')
+
   -- Explicitly size all panes: file tree fixed, diff panes split the rest
   M.equalize_panes()
 
