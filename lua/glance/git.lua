@@ -24,7 +24,7 @@ function M.get_changed_files()
     return { staged = {}, changes = {}, untracked = {} }
   end
 
-  local output = vim.fn.system('git status --porcelain=v1 2>/dev/null')
+  local output = vim.fn.system('git status --porcelain=v1 --untracked-files=all 2>/dev/null')
   if vim.v.shell_error ~= 0 then
     return { staged = {}, changes = {}, untracked = {} }
   end
