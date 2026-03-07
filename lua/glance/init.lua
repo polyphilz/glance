@@ -22,6 +22,7 @@ function M.start()
   vim.opt.relativenumber = true
   vim.opt.signcolumn = 'yes'
   vim.opt.autoread = true
+  vim.opt.hidden = false
   vim.opt.smoothscroll = true
   vim.opt.mousescroll = 'ver:1,hor:1'
 

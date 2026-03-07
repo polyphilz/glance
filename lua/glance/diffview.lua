@@ -259,7 +259,30 @@ function M.setup_autocmds(file)
 end
 
 --- Clean up diff windows and buffers, return to file tree.
-function M.close()
+--- @param force boolean|nil  If true, discard unsaved changes. Otherwise prompt.
+function M.close(force)
+  -- Check for unsaved changes in the new (editable) buffer before closing
+  if not force
+    and M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf)
+    and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == ''
+    and vim.api.nvim_buf_get_option(M.new_buf, 'modified')
+  then
+    -- Focus the new pane so the user sees the modified buffer
+    if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
+      vim.api.nvim_set_current_win(M.new_win)
+    end
+    local choice = vim.fn.confirm(
+      'Save changes?',
+      '&Yes\n&No\n&Cancel', 3
+    )
+    if choice == 1 then
+      vim.api.nvim_buf_call(M.new_buf, function() vim.cmd('write') end)
+    elseif choice == 3 or choice == 0 then
+      return -- abort close
+    end
+    -- choice == 2: discard changes, continue closing
+  end
+
   -- Close minimap first (before closing diff windows)
   local minimap = require('glance.minimap')
   minimap.close()
