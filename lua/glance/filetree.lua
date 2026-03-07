@@ -307,8 +307,8 @@ function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
   local km = config.options.keymaps
 
-  vim.keymap.set('n', 'j', function() M.move_down() end, opts)
-  vim.keymap.set('n', 'k', function() M.move_up() end, opts)
+  vim.keymap.set('n', 'j', function() for _ = 1, vim.v.count1 do M.move_down() end end, opts)
+  vim.keymap.set('n', 'k', function() for _ = 1, vim.v.count1 do M.move_up() end end, opts)
   vim.keymap.set('n', km.next_section, function() M.next_section() end, opts)
   vim.keymap.set('n', km.prev_section, function() M.prev_section() end, opts)
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)
