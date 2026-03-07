@@ -30,9 +30,9 @@ local CURSOR = 4
 -- Colors: muted for out-of-viewport, brighter for in-viewport
 local COLORS = {
   [NONE]   = '#111111',
-  [ADD]    = '#1a3d1a',
-  [DELETE] = '#3d1a1a',
-  [CHANGE] = '#2b2b00',
+  [ADD]    = '#2ea043',
+  [DELETE] = '#f85149',
+  [CHANGE] = '#d29922',
   [CURSOR] = '#C8C8C8',
 }
 
