@@ -8,6 +8,7 @@ M.defaults = {
     refresh = 'r',
     next_section = 'J',
     prev_section = 'K',
+    toggle_filetree = '<Tab>',
   },
   signs = {
     modified = 'M',

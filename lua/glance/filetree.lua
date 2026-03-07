@@ -257,6 +257,51 @@ function M.refresh()
   end
 end
 
+--- Toggle the file tree sidebar visibility.
+function M.toggle()
+  local ui = require('glance.ui')
+  if not ui.diff_open then
+    return
+  end
+
+  local diffview = require('glance.diffview')
+
+  if M.win and vim.api.nvim_win_is_valid(M.win) then
+    -- Hide: close the window but keep the buffer
+    vim.api.nvim_win_hide(M.win)
+    M.win = nil
+    diffview.equalize_panes()
+  else
+    -- Show: create a left split and put the filetree buffer in it
+    vim.cmd('topleft vnew')
+    local new_win = vim.api.nvim_get_current_win()
+    local scratch_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(new_win, M.buf)
+    -- Delete the scratch buffer created by vnew
+    if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= M.buf then
+      vim.api.nvim_buf_delete(scratch_buf, { force = true })
+    end
+    M.win = new_win
+
+    -- Reapply window options
+    vim.api.nvim_win_set_option(M.win, 'number', false)
+    vim.api.nvim_win_set_option(M.win, 'relativenumber', false)
+    vim.api.nvim_win_set_option(M.win, 'signcolumn', 'no')
+    vim.api.nvim_win_set_option(M.win, 'cursorline', true)
+    vim.api.nvim_win_set_width(M.win, config.options.filetree_width)
+    vim.api.nvim_win_set_option(M.win, 'winfixwidth', true)
+
+    diffview.equalize_panes()
+
+    -- Return focus to a diff pane
+    if diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win) then
+      vim.api.nvim_set_current_win(diffview.new_win)
+    elseif diffview.old_win and vim.api.nvim_win_is_valid(diffview.old_win) then
+      vim.api.nvim_set_current_win(diffview.old_win)
+    end
+  end
+end
+
 --- Set up buffer-local keymaps for the file tree.
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
@@ -268,6 +313,7 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.prev_section, function() M.prev_section() end, opts)
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)
   vim.keymap.set('n', km.refresh, function() M.refresh() end, opts)
+  vim.keymap.set('n', km.toggle_filetree, function() M.toggle() end, opts)
   vim.keymap.set('n', km.open_file, function()
     local file = M.get_selected_file()
     if file then

@@ -94,8 +94,9 @@ function M.open(file)
     M.watch_file(full_path)
   end
 
-  -- Set up autocmds
+  -- Set up autocmds and keymaps
   M.setup_autocmds(file)
+  M.bind_toggle_keymap()
 end
 
 --- Open a single read-only pane for a deleted file.
@@ -137,6 +138,7 @@ function M.open_deleted(file)
 
   M.equalize_panes()
   M.setup_autocmds(file)
+  M.bind_toggle_keymap()
 end
 
 --- Open a single editable pane for an untracked file.
@@ -160,6 +162,7 @@ function M.open_untracked(file)
 
   M.equalize_panes()
   M.setup_autocmds(file)
+  M.bind_toggle_keymap()
 end
 
 --- Watch a file on disk for external changes and reload the buffer instantly.
@@ -187,6 +190,22 @@ function M.stop_watching()
     M.fs_watcher:stop()
     M.fs_watcher:close()
     M.fs_watcher = nil
+  end
+end
+
+--- Bind toggle filetree keymap on diff buffers.
+function M.bind_toggle_keymap()
+  local km = config.options.keymaps
+  local bufs = {}
+  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
+    table.insert(bufs, M.old_buf)
+  end
+  if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
+    table.insert(bufs, M.new_buf)
+  end
+  for _, buf in ipairs(bufs) do
+    vim.keymap.set('n', km.toggle_filetree, function() filetree.toggle() end,
+      { noremap = true, silent = true, buffer = buf })
   end
 end
 
@@ -304,13 +323,22 @@ end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.
 function M.equalize_panes()
-  local tree_width = config.options.filetree_width
-  vim.api.nvim_win_set_width(filetree.win, tree_width)
+  local tree_visible = filetree.win and vim.api.nvim_win_is_valid(filetree.win)
+  local tree_width = 0
+
+  if tree_visible then
+    tree_width = config.options.filetree_width
+    vim.api.nvim_win_set_width(filetree.win, tree_width)
+  end
+
+  -- Count separators: 1 if tree visible, plus 1 if two diff panes
+  local separators = (tree_visible and 1 or 0)
 
   if M.old_win and vim.api.nvim_win_is_valid(M.old_win) and
      M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
     -- Two diff panes: split remaining space evenly
-    local remaining = vim.o.columns - tree_width - 2 -- 2 for separators
+    separators = separators + 1
+    local remaining = vim.o.columns - tree_width - separators
     vim.api.nvim_win_set_width(M.old_win, math.floor(remaining / 2))
   end
 end
