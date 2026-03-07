@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve symlinks to find the actual script location
+SCRIPT="$0"
+while [ -L "$SCRIPT" ]; do
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+  SCRIPT="$(readlink "$SCRIPT")"
+  [[ "$SCRIPT" != /* ]] && SCRIPT="$SCRIPT_DIR/$SCRIPT"
+done
+GLANCE_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+
+# Verify we're inside a git repository
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "glance: not a git repository" >&2
+  exit 1
+fi
+
+# Launch neovim in minimal mode with only the glance plugin
+exec nvim --clean \
+  --cmd "set rtp+=$GLANCE_ROOT" \
+  -c "Glance"

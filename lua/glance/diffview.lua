@@ -1,0 +1,333 @@
+local git = require('glance.git')
+local config = require('glance.config')
+local filetree = require('glance.filetree')
+
+local M = {}
+
+-- State
+M.old_buf = nil
+M.old_win = nil
+M.new_buf = nil
+M.new_win = nil
+M.fs_watcher = nil
+M.autocmd_group = vim.api.nvim_create_augroup('GlanceDiffView', { clear = true })
+
+--- Open a standard 2-pane side-by-side diff for a modified file.
+function M.open(file)
+  local root = git.repo_root()
+  if not root then return end
+
+  -- Determine the ref for the old content
+  local old_ref
+  if file.section == 'staged' then
+    old_ref = 'HEAD'
+  else
+    old_ref = ':' -- index
+  end
+
+  -- Get old content
+  local old_lines = git.get_file_content(file.path, old_ref)
+
+  -- Resize file tree
+  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+
+  -- Create the old (left) pane: vertical split to the right of file tree
+  vim.api.nvim_set_current_win(filetree.win)
+  vim.cmd('rightbelow vnew')
+  M.old_win = vim.api.nvim_get_current_win()
+  M.old_buf = vim.api.nvim_get_current_buf()
+  M.set_win_options(M.old_win)
+
+  -- Set up old buffer
+  local old_name = 'glance://old/' .. file.path
+  pcall(vim.api.nvim_buf_set_name, M.old_buf, old_name)
+  vim.api.nvim_buf_set_lines(M.old_buf, 0, -1, false, old_lines)
+  vim.api.nvim_buf_set_option(M.old_buf, 'buftype', 'nofile')
+  vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', false)
+  vim.api.nvim_buf_set_option(M.old_buf, 'readonly', true)
+  vim.api.nvim_buf_set_option(M.old_buf, 'swapfile', false)
+  M.set_filetype_from_path(M.old_buf, file.path)
+
+  -- Create the new (right) pane: vertical split to the right of old pane
+  vim.cmd('rightbelow vnew')
+  M.new_win = vim.api.nvim_get_current_win()
+  M.set_win_options(M.new_win)
+
+  -- Open the actual file on disk (editable)
+  local full_path = root .. '/' .. file.path
+  if file.section == 'staged' then
+    -- For staged files, show the index version (not working tree)
+    local index_lines = git.get_file_content(file.path, ':')
+    M.new_buf = vim.api.nvim_get_current_buf()
+    local new_name = 'glance://staged/' .. file.path
+    pcall(vim.api.nvim_buf_set_name, M.new_buf, new_name)
+    vim.api.nvim_buf_set_lines(M.new_buf, 0, -1, false, index_lines)
+    vim.api.nvim_buf_set_option(M.new_buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(M.new_buf, 'modifiable', false)
+    vim.api.nvim_buf_set_option(M.new_buf, 'readonly', true)
+    vim.api.nvim_buf_set_option(M.new_buf, 'swapfile', false)
+    M.set_filetype_from_path(M.new_buf, file.path)
+  else
+    vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
+    M.new_buf = vim.api.nvim_get_current_buf()
+  end
+
+  -- Enable diff mode on both panes
+  vim.api.nvim_set_current_win(M.old_win)
+  vim.cmd('diffthis')
+  vim.api.nvim_set_current_win(M.new_win)
+  vim.cmd('diffthis')
+
+  -- Disable diff folding (must be after diffthis which forces foldenable=true)
+  vim.api.nvim_win_set_option(M.old_win, 'foldenable', false)
+  vim.api.nvim_win_set_option(M.new_win, 'foldenable', false)
+
+  -- Explicitly size all panes: file tree fixed, diff panes split the rest
+  M.equalize_panes()
+
+  -- Focus the new (right) pane
+  vim.api.nvim_set_current_win(M.new_win)
+
+  -- Watch for external changes to the file
+  if file.section ~= 'staged' then
+    M.watch_file(full_path)
+  end
+
+  -- Set up autocmds
+  M.setup_autocmds(file)
+end
+
+--- Open a single read-only pane for a deleted file.
+function M.open_deleted(file)
+  local old_ref
+  if file.section == 'staged' then
+    old_ref = 'HEAD'
+  else
+    old_ref = ':'
+  end
+
+  local lines = git.get_file_content(file.path, old_ref)
+
+  -- Resize file tree
+  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+
+  -- Create a single pane
+  vim.api.nvim_set_current_win(filetree.win)
+  vim.cmd('rightbelow vnew')
+  M.new_win = vim.api.nvim_get_current_win()
+  M.new_buf = vim.api.nvim_get_current_buf()
+  M.set_win_options(M.new_win)
+
+  local buf_name = 'glance://deleted/' .. file.path
+  pcall(vim.api.nvim_buf_set_name, M.new_buf, buf_name)
+  vim.api.nvim_buf_set_lines(M.new_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(M.new_buf, 'buftype', 'nofile')
+  vim.api.nvim_buf_set_option(M.new_buf, 'modifiable', false)
+  vim.api.nvim_buf_set_option(M.new_buf, 'readonly', true)
+  vim.api.nvim_buf_set_option(M.new_buf, 'swapfile', false)
+  M.set_filetype_from_path(M.new_buf, file.path)
+
+  -- Highlight all lines as deleted
+  local ns = vim.api.nvim_create_namespace('glance_deleted')
+  for i = 0, #lines - 1 do
+    vim.api.nvim_buf_add_highlight(M.new_buf, ns, 'DiffDelete', i, 0, -1)
+  end
+
+  M.equalize_panes()
+  M.setup_autocmds(file)
+end
+
+--- Open a single editable pane for an untracked file.
+function M.open_untracked(file)
+  local root = git.repo_root()
+  if not root then return end
+
+  -- Resize file tree
+  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+
+  -- Create a single pane and open the file
+  vim.api.nvim_set_current_win(filetree.win)
+  vim.cmd('rightbelow vnew')
+  M.new_win = vim.api.nvim_get_current_win()
+  M.set_win_options(M.new_win)
+
+  local full_path = root .. '/' .. file.path
+  vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
+  M.new_buf = vim.api.nvim_get_current_buf()
+
+  M.equalize_panes()
+  M.setup_autocmds(file)
+end
+
+--- Watch a file on disk for external changes and reload the buffer instantly.
+function M.watch_file(path)
+  M.stop_watching()
+  local w = vim.uv.new_fs_event()
+  if not w then return end
+  M.fs_watcher = w
+  w:start(path, {}, function(err)
+    if err then return end
+    vim.schedule(function()
+      if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
+        vim.api.nvim_buf_call(M.new_buf, function()
+          vim.cmd('silent! edit!')
+        end)
+        vim.cmd('silent! diffupdate')
+      end
+    end)
+  end)
+end
+
+--- Stop watching the current file.
+function M.stop_watching()
+  if M.fs_watcher then
+    M.fs_watcher:stop()
+    M.fs_watcher:close()
+    M.fs_watcher = nil
+  end
+end
+
+--- Set up autocmds for managing diff view lifecycle.
+function M.setup_autocmds(file)
+  vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
+
+  -- Track which windows belong to the diff view
+  local diff_wins = {}
+  if M.old_win then table.insert(diff_wins, M.old_win) end
+  if M.new_win then table.insert(diff_wins, M.new_win) end
+
+  -- When any diff window is closed, close them all and return to file tree
+  vim.api.nvim_create_autocmd('WinClosed', {
+    group = M.autocmd_group,
+    callback = function(args)
+      local closed_win = tonumber(args.match)
+      local is_diff_win = false
+      for _, w in ipairs(diff_wins) do
+        if w == closed_win then
+          is_diff_win = true
+          break
+        end
+      end
+
+      if is_diff_win then
+        -- Schedule to avoid issues with closing windows during WinClosed
+        vim.schedule(function()
+          M.close()
+        end)
+      end
+    end,
+  })
+
+  -- When the new buffer is saved, refresh the diff
+  if M.new_buf and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == '' then
+    vim.api.nvim_create_autocmd('BufWritePost', {
+      group = M.autocmd_group,
+      buffer = M.new_buf,
+      callback = function()
+        vim.schedule(function()
+          M.refresh(file)
+        end)
+      end,
+    })
+  end
+end
+
+--- Clean up diff windows and buffers, return to file tree.
+function M.close()
+  M.stop_watching()
+  vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
+
+  -- Turn off diff mode in any remaining diff windows
+  local function safe_diffoff(win)
+    if win and vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_set_current_win(win)
+      vim.cmd('diffoff')
+    end
+  end
+  safe_diffoff(M.old_win)
+  safe_diffoff(M.new_win)
+
+  -- Close old pane window and buffer
+  if M.old_win and vim.api.nvim_win_is_valid(M.old_win) then
+    vim.api.nvim_win_close(M.old_win, true)
+  end
+  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
+    vim.api.nvim_buf_delete(M.old_buf, { force = true })
+  end
+
+  -- Close new pane window (but don't force-delete file buffers, just close the window)
+  if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
+    vim.api.nvim_win_close(M.new_win, true)
+  end
+  -- Delete scratch buffers (nofile), but leave real file buffers alone
+  if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
+    local buftype = vim.api.nvim_buf_get_option(M.new_buf, 'buftype')
+    if buftype == 'nofile' then
+      vim.api.nvim_buf_delete(M.new_buf, { force = true })
+    end
+  end
+
+  M.old_buf = nil
+  M.old_win = nil
+  M.new_buf = nil
+  M.new_win = nil
+
+  -- Return to file tree
+  local ui = require('glance.ui')
+  ui.close_diff()
+end
+
+--- Refresh the diff after a save (re-read old content, update diff).
+function M.refresh(file)
+  if not M.old_buf or not vim.api.nvim_buf_is_valid(M.old_buf) then
+    return
+  end
+  if not M.old_win or not vim.api.nvim_win_is_valid(M.old_win) then
+    return
+  end
+
+  -- Re-read old content from git
+  local old_ref = file.section == 'staged' and 'HEAD' or ':'
+  local old_lines = git.get_file_content(file.path, old_ref)
+
+  -- Update old buffer
+  vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', true)
+  vim.api.nvim_buf_set_lines(M.old_buf, 0, -1, false, old_lines)
+  vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', false)
+
+  -- Refresh diff
+  vim.cmd('diffupdate')
+end
+
+--- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.
+function M.equalize_panes()
+  local tree_width = config.options.filetree_width
+  vim.api.nvim_win_set_width(filetree.win, tree_width)
+
+  if M.old_win and vim.api.nvim_win_is_valid(M.old_win) and
+     M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
+    -- Two diff panes: split remaining space evenly
+    local remaining = vim.o.columns - tree_width - 2 -- 2 for separators
+    vim.api.nvim_win_set_width(M.old_win, math.floor(remaining / 2))
+  end
+end
+
+--- Apply standard window options to a diff pane (line numbers, etc).
+function M.set_win_options(win)
+  vim.api.nvim_win_set_option(win, 'number', true)
+  vim.api.nvim_win_set_option(win, 'relativenumber', true)
+  vim.api.nvim_win_set_option(win, 'signcolumn', 'yes')
+end
+
+--- Set the filetype of a buffer based on the file extension for syntax highlighting.
+function M.set_filetype_from_path(buf, path)
+  local ft = vim.filetype.match({ filename = path })
+  if ft then
+    vim.api.nvim_buf_set_option(buf, 'filetype', ft)
+  end
+end
+
+return M
