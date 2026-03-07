@@ -318,6 +318,19 @@ function M.close(force)
   safe_diffoff(M.old_win)
   safe_diffoff(M.new_win)
 
+  -- Restore filetree window before closing diff panes, so we never
+  -- try to close the last window (E444)
+  if not filetree.win or not vim.api.nvim_win_is_valid(filetree.win) then
+    vim.cmd('topleft vnew')
+    local new_win = vim.api.nvim_get_current_win()
+    local scratch_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(new_win, filetree.buf)
+    if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= filetree.buf then
+      vim.api.nvim_buf_delete(scratch_buf, { force = true })
+    end
+    filetree.win = new_win
+  end
+
   -- Close old pane window and buffer
   if M.old_win and vim.api.nvim_win_is_valid(M.old_win) then
     vim.api.nvim_win_close(M.old_win, true)
