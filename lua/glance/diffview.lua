@@ -348,6 +348,7 @@ function M.set_win_options(win)
   vim.api.nvim_win_set_option(win, 'number', true)
   vim.api.nvim_win_set_option(win, 'relativenumber', true)
   vim.api.nvim_win_set_option(win, 'signcolumn', 'yes')
+  vim.api.nvim_win_set_option(win, 'cursorline', false)
 end
 
 --- Set the filetype of a buffer based on the file extension for syntax highlighting.
