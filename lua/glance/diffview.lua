@@ -401,7 +401,7 @@ end
 function M.set_win_options(win)
   vim.api.nvim_win_set_option(win, 'number', true)
   vim.api.nvim_win_set_option(win, 'relativenumber', true)
-  vim.api.nvim_win_set_option(win, 'signcolumn', 'yes')
+  vim.api.nvim_win_set_option(win, 'signcolumn', 'no')
   vim.api.nvim_win_set_option(win, 'cursorline', false)
 end
 
