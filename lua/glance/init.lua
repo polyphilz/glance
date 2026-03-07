@@ -143,6 +143,9 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceStatusR', { fg = type_color })
   vim.api.nvim_set_hl(0, 'GlanceStatusU', { fg = '#808080' })
   vim.api.nvim_set_hl(0, 'GlanceActiveFile', { bg = selection })
+
+  -- Minimap highlights
+  require('glance.minimap').setup_highlights()
 end
 
 function M.setup_treesitter()

@@ -97,6 +97,10 @@ function M.open(file)
   -- Set up autocmds and keymaps
   M.setup_autocmds(file)
   M.bind_toggle_keymap()
+
+  -- Open diff minimap on the new (right) pane
+  local minimap = require('glance.minimap')
+  minimap.open(M.new_win, old_lines)
 end
 
 --- Open a single read-only pane for a deleted file.
@@ -256,6 +260,10 @@ end
 
 --- Clean up diff windows and buffers, return to file tree.
 function M.close()
+  -- Close minimap first (before closing diff windows)
+  local minimap = require('glance.minimap')
+  minimap.close()
+
   M.stop_watching()
   vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
 
@@ -319,6 +327,11 @@ function M.refresh(file)
 
   -- Refresh diff
   vim.cmd('diffupdate')
+
+  -- Refresh minimap with new old_lines
+  local minimap = require('glance.minimap')
+  minimap.old_lines = old_lines
+  minimap.full_update()
 end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.
