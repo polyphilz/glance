@@ -1,5 +1,9 @@
 local M = {}
 
+local function empty_files()
+  return { staged = {}, changes = {}, untracked = {} }
+end
+
 --- Check if the current directory is inside a git repository.
 function M.is_repo()
   local result = vim.fn.system('git rev-parse --is-inside-work-tree 2>/dev/null')
@@ -17,19 +21,13 @@ end
 
 --- Parse `git status --porcelain=v1` and categorize files into staged, changes, and untracked.
 --- A file can appear in both staged and changes (e.g., MM).
+--- @param output string
 --- @return { staged: table[], changes: table[], untracked: table[] }
-function M.get_changed_files()
-  local root = M.repo_root()
-  if not root then
-    return { staged = {}, changes = {}, untracked = {} }
+function M.parse_porcelain_status(output)
+  local files = empty_files()
+  if type(output) ~= 'string' or output == '' then
+    return files
   end
-
-  local output = vim.fn.system('git status --porcelain=v1 --untracked-files=all 2>/dev/null')
-  if vim.v.shell_error ~= 0 then
-    return { staged = {}, changes = {}, untracked = {} }
-  end
-
-  local files = { staged = {}, changes = {}, untracked = {} }
 
   for line in output:gmatch('[^\n]+') do
     if #line < 4 then
@@ -84,6 +82,20 @@ function M.get_changed_files()
   end
 
   return files
+end
+
+function M.get_changed_files()
+  local root = M.repo_root()
+  if not root then
+    return empty_files()
+  end
+
+  local output = vim.fn.system('git status --porcelain=v1 --untracked-files=all 2>/dev/null')
+  if vim.v.shell_error ~= 0 then
+    return empty_files()
+  end
+
+  return M.parse_porcelain_status(output)
 end
 
 --- Retrieve file content at a specific git ref.

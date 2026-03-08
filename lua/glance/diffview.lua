@@ -295,6 +295,7 @@ function M.close(force)
     return
   end
   M.closing = true
+  local discard_new_changes = force == true
 
   -- Check for unsaved changes in the new (editable) buffer before closing
   if not force
@@ -315,6 +316,8 @@ function M.close(force)
     elseif choice == 3 or choice == 0 then
       M.closing = false
       return -- abort close
+    else
+      discard_new_changes = true
     end
     -- choice == 2: discard changes, continue closing
   end
@@ -362,15 +365,18 @@ function M.close(force)
       vim.api.nvim_buf_delete(M.old_buf, { force = true })
     end
 
-    -- Close new pane window (but don't force-delete file buffers, just close the window)
+    -- Close the editable pane window, then clean up the backing buffer if Glance
+    -- is the last owner. This prevents hidden modified buffers from being reused.
     if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
       vim.api.nvim_win_close(M.new_win, true)
     end
-    -- Delete scratch buffers (nofile), but leave real file buffers alone
     if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
       local buftype = vim.api.nvim_buf_get_option(M.new_buf, 'buftype')
-      if buftype == 'nofile' then
-        vim.api.nvim_buf_delete(M.new_buf, { force = true })
+      local visible_elsewhere = vim.fn.bufwinid(M.new_buf) ~= -1
+      if buftype == 'nofile' or not visible_elsewhere then
+        vim.api.nvim_buf_delete(M.new_buf, {
+          force = discard_new_changes or buftype == 'nofile',
+        })
       end
     end
 

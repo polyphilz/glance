@@ -7,6 +7,7 @@
 --- 2x vertical resolution per terminal row.
 
 local M = {}
+local logic = require('glance.minimap_logic')
 
 local ns = vim.api.nvim_create_namespace('glance_minimap')
 
@@ -21,11 +22,11 @@ M.total_logical = 0
 M.augroup = vim.api.nvim_create_augroup('GlanceMinimap', { clear = true })
 
 -- Diff state constants
-local NONE   = 0
-local ADD    = 1
-local DELETE = 2
-local CHANGE = 3
-local CURSOR = 4
+local NONE = logic.states.NONE
+local ADD = logic.states.ADD
+local DELETE = logic.states.DELETE
+local CHANGE = logic.states.CHANGE
+local CURSOR = logic.states.CURSOR
 
 -- Colors: muted for out-of-viewport, brighter for in-viewport
 local COLORS = {
@@ -66,77 +67,6 @@ local function get_hl(top_state, bot_state, top_vp, bot_vp)
   return name
 end
 
---- Extract diff regions from old_lines vs new buffer content using vim.diff().
---- Returns a sparse table: line_types[lnum] = ADD|DELETE|CHANGE or nil.
-local function compute_line_types(old_lines, new_buf)
-  local new_lines = vim.api.nvim_buf_get_lines(new_buf, 0, -1, false)
-  local total = #new_lines
-
-  local old_text = table.concat(old_lines, '\n') .. '\n'
-  local new_text = table.concat(new_lines, '\n') .. '\n'
-
-  local ok, hunks = pcall(vim.diff, old_text, new_text, {
-    result_type = 'indices',
-    algorithm = 'histogram',
-  })
-  if not ok or not hunks then
-    return {}, total
-  end
-
-  local lt = {}
-  for _, h in ipairs(hunks) do
-    local old_count, new_start, new_count = h[2], h[3], h[4]
-
-    if old_count == 0 then
-      -- Pure addition
-      for lnum = new_start, new_start + new_count - 1 do
-        lt[lnum] = ADD
-      end
-    elseif new_count == 0 then
-      -- Pure deletion: mark the adjacent line
-      local mark = math.min(new_start + 1, total)
-      if mark >= 1 then
-        lt[mark] = lt[mark] or DELETE
-      end
-    else
-      -- Change
-      for lnum = new_start, new_start + new_count - 1 do
-        lt[lnum] = CHANGE
-      end
-    end
-  end
-
-  return lt, total
-end
-
---- Downsample line_types into pixel_count logical pixels.
---- Each pixel represents a proportional range of file lines.
-local function downsample(line_types, total_lines, pixel_count)
-  local pixels = {}
-  if total_lines == 0 or pixel_count == 0 then
-    for i = 1, pixel_count do pixels[i] = NONE end
-    return pixels, 0
-  end
-
-  for i = 1, pixel_count do
-    local src_start = math.floor((i - 1) * total_lines / pixel_count) + 1
-    local src_end = math.floor(i * total_lines / pixel_count)
-    src_end = math.max(src_end, src_start)
-
-    local best = NONE
-    for lnum = src_start, math.min(src_end, total_lines) do
-      local s = line_types[lnum]
-      if s then
-        if s == CHANGE then best = CHANGE; break
-        elseif s > best then best = s end
-      end
-    end
-    pixels[i] = best
-  end
-
-  return pixels, total_lines
-end
-
 --- Get visible line range in the target window.
 local function get_viewport()
   if not M.target_win or not vim.api.nvim_win_is_valid(M.target_win) then
@@ -154,8 +84,7 @@ local function get_cursor_pixel(total_lines, pixel_count)
   local cursor_line = vim.api.nvim_win_call(M.target_win, function()
     return vim.fn.line('.')
   end)
-  local px = math.floor((cursor_line - 1) / total_lines * pixel_count) + 1
-  return math.max(1, math.min(px, pixel_count))
+  return logic.cursor_pixel(cursor_line, total_lines, pixel_count)
 end
 
 --- Render the minimap buffer using half-block characters.
@@ -198,14 +127,6 @@ local function render(pixels, pixel_count, vp_start_px, vp_end_px, cursor_px)
   end
 end
 
---- Compute viewport pixel range from visible lines.
-local function viewport_pixels(vp_top, vp_bot, total_lines, pixel_count)
-  if total_lines == 0 then return 1, pixel_count end
-  local s = math.floor((vp_top - 1) / total_lines * pixel_count) + 1
-  local e = math.ceil(vp_bot / total_lines * pixel_count)
-  return math.max(1, math.min(s, pixel_count)), math.max(1, math.min(e, pixel_count))
-end
-
 --- Viewport-only update: re-render with current scroll position but cached pixels.
 function M.update_viewport()
   if not M.cached_pixels or not M.win or not vim.api.nvim_win_is_valid(M.win) then return end
@@ -232,7 +153,7 @@ function M.update_viewport()
   end
 
   local vp_top, vp_bot = get_viewport()
-  local vps, vpe = viewport_pixels(vp_top, vp_bot, M.total_logical, M.pixel_count)
+  local vps, vpe = logic.viewport_pixels(vp_top, vp_bot, M.total_logical, M.pixel_count)
   local cpx = get_cursor_pixel(M.total_logical, M.pixel_count)
   render(M.cached_pixels, M.pixel_count, vps, vpe, cpx)
 end
@@ -248,12 +169,13 @@ function M.full_update()
   local wh = vim.api.nvim_win_get_height(M.target_win)
   M.pixel_count = wh * 2
 
-  local line_types, total_lines = compute_line_types(M.old_lines, new_buf)
+  local new_lines = vim.api.nvim_buf_get_lines(new_buf, 0, -1, false)
+  local line_types, total_lines = logic.compute_line_types(M.old_lines, new_lines)
   M.total_logical = total_lines
-  M.cached_pixels = downsample(line_types, total_lines, M.pixel_count)
+  M.cached_pixels = logic.downsample(line_types, total_lines, M.pixel_count)
 
   local vp_top, vp_bot = get_viewport()
-  local vps, vpe = viewport_pixels(vp_top, vp_bot, total_lines, M.pixel_count)
+  local vps, vpe = logic.viewport_pixels(vp_top, vp_bot, total_lines, M.pixel_count)
   local cpx = get_cursor_pixel(total_lines, M.pixel_count)
   render(M.cached_pixels, M.pixel_count, vps, vpe, cpx)
 end
