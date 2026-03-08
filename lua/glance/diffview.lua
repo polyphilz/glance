@@ -10,6 +10,7 @@ M.old_win = nil
 M.new_buf = nil
 M.new_win = nil
 M.fs_watcher = nil
+M.closing = false
 M.autocmd_group = vim.api.nvim_create_augroup('GlanceDiffView', { clear = true })
 
 --- Open a standard 2-pane side-by-side diff for a modified file.
@@ -267,11 +268,8 @@ function M.setup_autocmds(file)
         end
       end
 
-      if is_diff_win then
-        -- Schedule to avoid issues with closing windows during WinClosed
-        vim.schedule(function()
-          M.close()
-        end)
+      if is_diff_win and not M.closing then
+        M.close()
       end
     end,
   })
@@ -293,6 +291,11 @@ end
 --- Clean up diff windows and buffers, return to file tree.
 --- @param force boolean|nil  If true, discard unsaved changes. Otherwise prompt.
 function M.close(force)
+  if M.closing then
+    return
+  end
+  M.closing = true
+
   -- Check for unsaved changes in the new (editable) buffer before closing
   if not force
     and M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf)
@@ -310,75 +313,82 @@ function M.close(force)
     if choice == 1 then
       vim.api.nvim_buf_call(M.new_buf, function() vim.cmd('write') end)
     elseif choice == 3 or choice == 0 then
+      M.closing = false
       return -- abort close
     end
     -- choice == 2: discard changes, continue closing
   end
 
-  -- Suppress redraws during close to prevent filetree flash
   local old_lazyredraw = vim.o.lazyredraw
-  vim.o.lazyredraw = true
+  local ok, err = xpcall(function()
+    -- Suppress redraws during close to prevent filetree flash
+    vim.o.lazyredraw = true
 
-  -- Close minimap first (before closing diff windows)
-  local minimap = require('glance.minimap')
-  minimap.close()
+    -- Close minimap first (before closing diff windows)
+    local minimap = require('glance.minimap')
+    minimap.close()
 
-  M.stop_watching()
-  vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
+    M.stop_watching()
+    vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
 
-  -- Turn off diff mode in any remaining diff windows
-  local function safe_diffoff(win)
-    if win and vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_set_current_win(win)
-      vim.cmd('diffoff')
+    -- Turn off diff mode in any remaining diff windows
+    local function safe_diffoff(win)
+      if win and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_current_win(win)
+        vim.cmd('diffoff')
+      end
     end
-  end
-  safe_diffoff(M.old_win)
-  safe_diffoff(M.new_win)
+    safe_diffoff(M.old_win)
+    safe_diffoff(M.new_win)
 
-  -- Restore filetree window before closing diff panes, so we never
-  -- try to close the last window (E444)
-  if not filetree.win or not vim.api.nvim_win_is_valid(filetree.win) then
-    vim.cmd('topleft vnew')
-    local new_win = vim.api.nvim_get_current_win()
-    local scratch_buf = vim.api.nvim_get_current_buf()
-    vim.api.nvim_win_set_buf(new_win, filetree.buf)
-    if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= filetree.buf then
-      vim.api.nvim_buf_delete(scratch_buf, { force = true })
+    -- Restore filetree window before closing diff panes, so we never
+    -- try to close the last window (E444)
+    if not filetree.win or not vim.api.nvim_win_is_valid(filetree.win) then
+      vim.cmd('topleft vnew')
+      local new_win = vim.api.nvim_get_current_win()
+      local scratch_buf = vim.api.nvim_get_current_buf()
+      vim.api.nvim_win_set_buf(new_win, filetree.buf)
+      if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= filetree.buf then
+        vim.api.nvim_buf_delete(scratch_buf, { force = true })
+      end
+      filetree.win = new_win
     end
-    filetree.win = new_win
-  end
 
-  -- Close old pane window and buffer
-  if M.old_win and vim.api.nvim_win_is_valid(M.old_win) then
-    vim.api.nvim_win_close(M.old_win, true)
-  end
-  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
-    vim.api.nvim_buf_delete(M.old_buf, { force = true })
-  end
-
-  -- Close new pane window (but don't force-delete file buffers, just close the window)
-  if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
-    vim.api.nvim_win_close(M.new_win, true)
-  end
-  -- Delete scratch buffers (nofile), but leave real file buffers alone
-  if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
-    local buftype = vim.api.nvim_buf_get_option(M.new_buf, 'buftype')
-    if buftype == 'nofile' then
-      vim.api.nvim_buf_delete(M.new_buf, { force = true })
+    -- Close old pane window and buffer
+    if M.old_win and vim.api.nvim_win_is_valid(M.old_win) then
+      vim.api.nvim_win_close(M.old_win, true)
     end
-  end
+    if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
+      vim.api.nvim_buf_delete(M.old_buf, { force = true })
+    end
 
-  M.old_buf = nil
-  M.old_win = nil
-  M.new_buf = nil
-  M.new_win = nil
+    -- Close new pane window (but don't force-delete file buffers, just close the window)
+    if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
+      vim.api.nvim_win_close(M.new_win, true)
+    end
+    -- Delete scratch buffers (nofile), but leave real file buffers alone
+    if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
+      local buftype = vim.api.nvim_buf_get_option(M.new_buf, 'buftype')
+      if buftype == 'nofile' then
+        vim.api.nvim_buf_delete(M.new_buf, { force = true })
+      end
+    end
 
-  -- Return to file tree
-  local ui = require('glance.ui')
-  ui.close_diff()
+    M.old_buf = nil
+    M.old_win = nil
+    M.new_buf = nil
+    M.new_win = nil
+
+    -- Return to file tree
+    local ui = require('glance.ui')
+    ui.close_diff()
+  end, debug.traceback)
 
   vim.o.lazyredraw = old_lazyredraw
+  M.closing = false
+  if not ok then
+    error(err)
+  end
   vim.cmd('redraw')
 end
 
