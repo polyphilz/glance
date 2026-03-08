@@ -22,7 +22,10 @@ return {
             end
           end
 
+          local logo_hl = vim.api.nvim_get_hl(0, { name = 'GlanceWelcomeLogo', link = false })
+
           A.truthy(logo_line)
+          A.equal(string.format('#%06x', logo_hl.fg), '#F2E94B')
           A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.filetree_width)
           A.equal(vim.api.nvim_get_current_win(), filetree.win)
         end)
