@@ -155,6 +155,10 @@ function M.setup_highlights()
 
   -- Minimap highlights
   require('glance.minimap').setup_highlights()
+  require('glance.ui').setup_welcome_highlights({
+    base = comment,
+    bright = fg,
+  })
 end
 
 function M.setup_treesitter()
