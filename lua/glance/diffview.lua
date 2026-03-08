@@ -205,10 +205,10 @@ end
 --- Watch a file on disk for external changes and reload the buffer instantly.
 function M.watch_file(path)
   M.stop_watching()
-  local w = vim.uv.new_fs_event()
+  local w = vim.uv.new_fs_poll()
   if not w then return end
   M.fs_watcher = w
-  w:start(path, {}, function(err)
+  w:start(path, 200, function(err)
     if err then return end
     vim.schedule(function()
       if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
@@ -412,9 +412,12 @@ function M.refresh(file)
   local old_lines = git.get_file_content(file.path, old_ref)
 
   -- Update old buffer
+  local old_readonly = vim.api.nvim_buf_get_option(M.old_buf, 'readonly')
+  vim.api.nvim_buf_set_option(M.old_buf, 'readonly', false)
   vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', true)
   vim.api.nvim_buf_set_lines(M.old_buf, 0, -1, false, old_lines)
   vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', false)
+  vim.api.nvim_buf_set_option(M.old_buf, 'readonly', old_readonly)
 
   -- Refresh diff
   vim.cmd('diffupdate')

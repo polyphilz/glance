@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+export XDG_STATE_HOME="$TMP_DIR/state"
+export XDG_DATA_HOME="$TMP_DIR/data"
+export XDG_CACHE_HOME="$TMP_DIR/cache"
+mkdir -p "$XDG_STATE_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+
+cd "$ROOT"
+nvim --headless -u NONE -i NONE \
+  --cmd "set rtp+=$ROOT" \
+  -c "lua require('tests.runner').run({ suite = 'integration' })"

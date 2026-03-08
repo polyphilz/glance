@@ -101,6 +101,7 @@ end
 local function init_repo()
   local root = vim.fn.tempname()
   vim.fn.mkdir(root, 'p')
+  root = vim.loop.fs_realpath(root) or root
   git(root, { 'init' })
   git(root, { 'config', 'user.name', 'Glance Tests' })
   git(root, { 'config', 'user.email', 'glance-tests@example.com' })
