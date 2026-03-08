@@ -25,8 +25,13 @@ function M.open(file)
     old_ref = ':' -- index
   end
 
-  -- Get old content
-  local old_lines = git.get_file_content(file.path, old_ref)
+  -- For staged renames, the old content lives at old_path in HEAD.
+  -- For changes, the index already has the file at the new path.
+  local old_content_path = file.path
+  if file.section == 'staged' and file.old_path then
+    old_content_path = file.old_path
+  end
+  local old_lines = git.get_file_content(old_content_path, old_ref)
 
   -- Resize file tree
   vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
@@ -69,17 +74,26 @@ function M.open(file)
   -- Open the actual file on disk (editable)
   local full_path = root .. '/' .. file.path
   if file.section == 'staged' then
-    -- For staged files, show the index version (not working tree)
+    -- For staged files, show the index version via temp file (for syntax highlighting)
     local index_lines = git.get_file_content(file.path, ':')
+    local new_scratch = vim.api.nvim_get_current_buf()
+    local new_ext = vim.fn.fnamemodify(file.path, ':e')
+    local new_tmpfile = vim.fn.tempname() .. '.' .. new_ext
+    local nf = io.open(new_tmpfile, 'w')
+    if nf then
+      nf:write(table.concat(index_lines, '\n'))
+      nf:close()
+    end
+    vim.cmd('edit ' .. vim.fn.fnameescape(new_tmpfile))
     M.new_buf = vim.api.nvim_get_current_buf()
-    local new_name = 'glance://staged/' .. file.path
-    pcall(vim.api.nvim_buf_set_name, M.new_buf, new_name)
-    vim.api.nvim_buf_set_lines(M.new_buf, 0, -1, false, index_lines)
+    vim.fn.delete(new_tmpfile)
+    if vim.api.nvim_buf_is_valid(new_scratch) and new_scratch ~= M.new_buf then
+      vim.api.nvim_buf_delete(new_scratch, { force = true })
+    end
     vim.api.nvim_buf_set_option(M.new_buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(M.new_buf, 'modifiable', false)
     vim.api.nvim_buf_set_option(M.new_buf, 'readonly', true)
     vim.api.nvim_buf_set_option(M.new_buf, 'swapfile', false)
-    M.set_filetype_from_path(M.new_buf, file.path)
   else
     vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
     M.new_buf = vim.api.nvim_get_current_buf()
@@ -301,6 +315,10 @@ function M.close(force)
     -- choice == 2: discard changes, continue closing
   end
 
+  -- Suppress redraws during close to prevent filetree flash
+  local old_lazyredraw = vim.o.lazyredraw
+  vim.o.lazyredraw = true
+
   -- Close minimap first (before closing diff windows)
   local minimap = require('glance.minimap')
   minimap.close()
@@ -359,6 +377,9 @@ function M.close(force)
   -- Return to file tree
   local ui = require('glance.ui')
   ui.close_diff()
+
+  vim.o.lazyredraw = old_lazyredraw
+  vim.cmd('redraw')
 end
 
 --- Refresh the diff after a save (re-read old content, update diff).

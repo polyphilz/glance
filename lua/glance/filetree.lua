@@ -19,6 +19,36 @@ function M.create_buf()
   vim.api.nvim_buf_set_name(buf, 'glance://files')
   M.buf = buf
   M.setup_keymaps()
+
+  -- Snap cursor to nearest file entry whenever it lands on a header/blank
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    buffer = buf,
+    callback = function()
+      if not M.win or not vim.api.nvim_win_is_valid(M.win) then return end
+      local line = vim.api.nvim_win_get_cursor(M.win)[1]
+      if M.line_map[line] then
+        M.selected_line = line
+        return
+      end
+      -- Search down first, then up for nearest file entry
+      local total = vim.api.nvim_buf_line_count(buf)
+      for i = line + 1, total do
+        if M.line_map[i] then
+          M.selected_line = i
+          vim.api.nvim_win_set_cursor(M.win, { i, 4 })
+          return
+        end
+      end
+      for i = line - 1, 1, -1 do
+        if M.line_map[i] then
+          M.selected_line = i
+          vim.api.nvim_win_set_cursor(M.win, { i, 4 })
+          return
+        end
+      end
+    end,
+  })
+
   return buf
 end
 

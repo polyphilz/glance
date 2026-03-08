@@ -43,7 +43,7 @@ function M.get_changed_files()
     -- Handle renamed files: "R  old -> new"
     local old_path = nil
     if x == 'R' or y == 'R' then
-      local arrow_pos = path:find(' -> ')
+      local arrow_pos = path:find(' -> ', 1, true)
       if arrow_pos then
         old_path = path:sub(1, arrow_pos - 1)
         path = path:sub(arrow_pos + 4)
