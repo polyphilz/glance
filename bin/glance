@@ -19,4 +19,5 @@ fi
 # Launch neovim in minimal mode with only the glance plugin
 exec nvim --clean \
   --cmd "set rtp+=$GLANCE_ROOT" \
+  -c "lua require('glance').setup({ hide_statusline = true })" \
   -c "Glance"

@@ -2,6 +2,7 @@ local M = {}
 
 M.defaults = {
   filetree_width = 30,
+  hide_statusline = false,
   keymaps = {
     open_file = '<CR>',
     quit = 'q',

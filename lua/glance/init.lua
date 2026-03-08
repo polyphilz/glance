@@ -5,6 +5,7 @@ function M.setup(opts)
 end
 
 function M.start()
+  local config = require('glance.config')
   local git = require('glance.git')
   local ui = require('glance.ui')
   local filetree = require('glance.filetree')
@@ -25,6 +26,9 @@ function M.start()
   vim.opt.hidden = false
   vim.opt.smoothscroll = true
   vim.opt.mousescroll = 'ver:1,hor:1'
+  if config.options.hide_statusline then
+    vim.opt.laststatus = 0
+  end
 
   -- Auto-detect external file changes (e.g. edits from Cursor/VS Code)
   vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold' }, {

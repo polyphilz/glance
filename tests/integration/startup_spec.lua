@@ -62,6 +62,7 @@ return {
       name = 'dirty startup sets options highlights and the initial layout',
       run = function()
         N.with_repo('repo_modified', function()
+          vim.o.laststatus = 3
           require('glance').start()
           local config = require('glance.config')
           local filetree = require('glance.filetree')
@@ -73,8 +74,23 @@ return {
           A.equal(vim.o.autoread, true)
           A.equal(vim.o.hidden, false)
           A.equal(vim.o.smoothscroll, true)
+          A.equal(vim.o.laststatus, 3)
           A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.filetree_width)
           A.truthy(next(vim.api.nvim_get_hl(0, { name = 'GlanceSectionHeader', link = false })) ~= nil)
+        end)
+      end,
+    },
+    {
+      name = 'startup can hide the statusline when configured',
+      run = function()
+        N.with_repo('repo_modified', function()
+          local glance = require('glance')
+
+          vim.o.laststatus = 3
+          glance.setup({ hide_statusline = true })
+          glance.start()
+
+          A.equal(vim.o.laststatus, 0)
         end)
       end,
     },

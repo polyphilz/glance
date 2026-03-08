@@ -9,6 +9,7 @@ return {
         local config = require('glance.config')
         A.same(config.defaults, {
           filetree_width = 30,
+          hide_statusline = false,
           keymaps = {
             open_file = '<CR>',
             quit = 'q',
@@ -33,12 +34,14 @@ return {
         local config = require('glance.config')
         config.setup({
           filetree_width = 42,
+          hide_statusline = true,
           keymaps = {
             quit = 'x',
           },
         })
 
         A.equal(config.options.filetree_width, 42)
+        A.equal(config.options.hide_statusline, true)
         A.equal(config.options.keymaps.quit, 'x')
         A.equal(config.options.keymaps.open_file, '<CR>')
         A.equal(config.options.signs.deleted, 'D')
