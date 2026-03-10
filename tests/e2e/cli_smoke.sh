@@ -33,7 +33,7 @@ git -C "$TMP_DIR/repo" init >/dev/null 2>&1
 
 grep -Fx -- "--clean" "$TMP_DIR/nvim.args" >/dev/null
 grep -Fx -- "-c" "$TMP_DIR/nvim.args" >/dev/null
-grep -Fx -- "lua require('glance').setup({ hide_statusline = true })" "$TMP_DIR/nvim.args" >/dev/null
+grep -Fx -- "lua require('glance').setup({ hide_statusline = true, hunk_navigation = { next = 'n', prev = 'N' } })" "$TMP_DIR/nvim.args" >/dev/null
 grep -Fx -- "Glance" "$TMP_DIR/nvim.args" >/dev/null
 grep -Fx -- "--cmd" "$TMP_DIR/nvim.args" >/dev/null
 grep -F "set rtp+=$ROOT" "$TMP_DIR/nvim.args" >/dev/null

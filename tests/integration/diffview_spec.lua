@@ -115,6 +115,78 @@ return {
       end,
     },
     {
+      name = 'configured hunk navigation aliases jump between diff hunks',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          repo:write(repo.files.tracked, table.concat({
+            'line 1',
+            'line 2',
+            'line 3',
+            'line 4',
+            'line 5',
+            'line 6',
+            'line 7',
+            'line 8',
+            'line 9',
+            'line 10',
+          }, '\n') .. '\n')
+          repo:commit_all('seed multi-hunk baseline')
+
+          repo:write(repo.files.tracked, table.concat({
+            'line 1',
+            'line 2 changed',
+            'line 3',
+            'line 4',
+            'line 5 changed',
+            'line 6',
+            'line 7',
+            'line 8',
+            'line 9 changed',
+            'line 10',
+          }, '\n') .. '\n')
+
+          require('glance').setup({
+            hunk_navigation = {
+              next = 'N',
+              prev = 'n',
+            },
+          })
+          require('glance').start()
+
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+
+          local keymaps = vim.api.nvim_buf_get_keymap(diffview.new_buf, 'n')
+          local has_next = false
+          local has_prev = false
+          for _, map in ipairs(keymaps) do
+            if map.lhs == 'N' then
+              has_next = true
+            elseif map.lhs == 'n' then
+              has_prev = true
+            end
+          end
+
+          vim.api.nvim_set_current_win(diffview.new_win)
+          vim.api.nvim_win_set_cursor(diffview.new_win, { 1, 0 })
+
+          N.press('N')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], 2)
+
+          N.press('N')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], 5)
+
+          N.press('n')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], 2)
+
+          A.truthy(has_next)
+          A.truthy(has_prev)
+        end)
+      end,
+    },
+    {
       name = 'save refreshes disk and minimap and watcher reloads external edits',
       run = function()
         N.with_repo('repo_modified', function(repo)

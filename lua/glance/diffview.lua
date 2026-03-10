@@ -129,7 +129,7 @@ function M.open(file)
 
   -- Set up autocmds and keymaps
   M.setup_autocmds(file)
-  M.bind_toggle_keymap()
+  M.bind_buffer_keymaps()
 
   -- Open diff minimap on the new (right) pane
   local minimap = require('glance.minimap')
@@ -175,7 +175,7 @@ function M.open_deleted(file)
 
   M.equalize_panes()
   M.setup_autocmds(file)
-  M.bind_toggle_keymap()
+  M.bind_buffer_keymaps()
 end
 
 --- Open a single editable pane for an untracked file.
@@ -199,7 +199,7 @@ function M.open_untracked(file)
 
   M.equalize_panes()
   M.setup_autocmds(file)
-  M.bind_toggle_keymap()
+  M.bind_buffer_keymaps()
 end
 
 --- Watch a file on disk for external changes and reload the buffer instantly.
@@ -230,9 +230,7 @@ function M.stop_watching()
   end
 end
 
---- Bind toggle filetree keymap on diff buffers.
-function M.bind_toggle_keymap()
-  local km = config.options.keymaps
+local function collect_view_buffers()
   local bufs = {}
   if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
     table.insert(bufs, M.old_buf)
@@ -240,9 +238,63 @@ function M.bind_toggle_keymap()
   if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
     table.insert(bufs, M.new_buf)
   end
-  for _, buf in ipairs(bufs) do
-    vim.keymap.set('n', km.toggle_filetree, function() filetree.toggle() end,
-      { noremap = true, silent = true, buffer = buf })
+  return bufs
+end
+
+local function collect_diff_buffers()
+  local bufs = {}
+
+  local function add_if_diff(buf, win)
+    if not buf or not win then
+      return
+    end
+    if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
+      return
+    end
+    if not vim.api.nvim_get_option_value('diff', { win = win }) then
+      return
+    end
+    table.insert(bufs, buf)
+  end
+
+  add_if_diff(M.old_buf, M.old_win)
+  add_if_diff(M.new_buf, M.new_win)
+
+  return bufs
+end
+
+local function set_buffer_keymap(buf, lhs, rhs)
+  if lhs == nil or lhs == '' then
+    return
+  end
+
+  vim.keymap.set('n', lhs, rhs, {
+    noremap = true,
+    silent = true,
+    buffer = buf,
+  })
+end
+
+local function jump_hunk(keys)
+  return function()
+    vim.cmd.normal({ args = { keys }, bang = true })
+  end
+end
+
+--- Bind buffer-local keymaps on Glance view buffers.
+function M.bind_buffer_keymaps()
+  local km = config.options.keymaps
+  local hunk = config.options.hunk_navigation or {}
+
+  for _, buf in ipairs(collect_view_buffers()) do
+    set_buffer_keymap(buf, km.toggle_filetree, function()
+      filetree.toggle()
+    end)
+  end
+
+  for _, buf in ipairs(collect_diff_buffers()) do
+    set_buffer_keymap(buf, hunk.next, jump_hunk(']c'))
+    set_buffer_keymap(buf, hunk.prev, jump_hunk('[c'))
   end
 end
 
