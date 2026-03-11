@@ -44,13 +44,13 @@ local function colors()
     [ADD] = palette.added,
     [DELETE] = palette.deleted,
     [CHANGE] = palette.changed,
-    [CURSOR] = '#C8C8C8',
+    [CURSOR] = palette.minimap_cursor,
   }, {
     [NONE] = palette.minimap_viewport_bg,
     [ADD] = palette.added,
     [DELETE] = palette.deleted,
     [CHANGE] = palette.changed,
-    [CURSOR] = '#C8C8C8',
+    [CURSOR] = palette.minimap_cursor,
   }
 end
 

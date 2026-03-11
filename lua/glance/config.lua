@@ -1,4 +1,5 @@
 local M = {}
+local theme_presets = require('glance.theme_presets')
 
 local VALID_SIGNCOLUMN = {
   no = true,
@@ -53,6 +54,7 @@ local ALLOWED_THEME_PALETTE = {
   changed = true,
   minimap_bg = true,
   minimap_viewport_bg = true,
+  minimap_cursor = true,
   statusline_bg = true,
   split = true,
   deleted_old = true,
@@ -136,7 +138,7 @@ local ALLOWED_WATCH = {
   interval_ms = true,
 }
 
-M.defaults = {
+local BASE_DEFAULTS = {
   app = {
     hide_statusline = false,
     colorscheme = 'default',
@@ -149,36 +151,7 @@ M.defaults = {
   },
   theme = {
     preset = 'seti_black',
-    palette = {
-      bg = '#000000',
-      fg = '#D7D7D7',
-      muted = '#677A83',
-      string = '#E6DB74',
-      keyword = '#F92672',
-      func = '#A6E22E',
-      type = '#66D9EF',
-      number = '#AE81FF',
-      accent = '#FD971F',
-      selection = '#444444',
-      line_highlight = '#333333',
-      logo = '#F2E94B',
-      added = '#2ea043',
-      deleted = '#f85149',
-      changed = '#d29922',
-      minimap_bg = '#111111',
-      minimap_viewport_bg = '#2a2a2a',
-      statusline_bg = '#101010',
-      split = '#333333',
-      deleted_old = '#3d1a1a',
-      deleted_old_text = '#6b2c2c',
-      added_new = '#1a3d1a',
-      added_new_text = '#2b6b2b',
-      diff_change = '#2b2b00',
-      diff_text = '#4a4a00',
-      untracked = '#808080',
-      line_nr = '#555555',
-      folded = '#1a1a1a',
-    },
+    palette = {},
   },
   windows = {
     filetree = {
@@ -236,10 +209,25 @@ M.defaults = {
   },
 }
 
-M.options = vim.deepcopy(M.defaults)
-
 local function fail(message)
   error('glance: ' .. message)
+end
+
+local function resolve_theme(options)
+  local theme = options.theme or {}
+  local preset_name = theme.preset
+
+  if type(preset_name) ~= 'string' then
+    fail('theme.preset must be a string')
+  end
+
+  local preset = theme_presets[preset_name]
+  if not preset then
+    fail('unknown theme preset ' .. preset_name)
+  end
+
+  theme.palette = vim.tbl_deep_extend('force', vim.deepcopy(preset), theme.palette or {})
+  return options
 end
 
 local function validate_known_keys(tbl, allowed, prefix)
@@ -321,6 +309,9 @@ local function validate_theme(options)
   local theme = options.theme
   validate_known_keys(theme, ALLOWED_THEME, 'theme')
   validate_string(theme.preset, 'theme.preset')
+  if not theme_presets[theme.preset] then
+    fail('unknown theme preset ' .. theme.preset)
+  end
   validate_known_keys(theme.palette, ALLOWED_THEME_PALETTE, 'theme.palette')
   for key, value in pairs(theme.palette) do
     validate_hex_color(value, 'theme.palette.' .. key)
@@ -425,10 +416,14 @@ local function validate_options(options)
 end
 
 function M.merge(opts)
-  local merged = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  local merged = vim.tbl_deep_extend('force', vim.deepcopy(BASE_DEFAULTS), opts or {})
+  resolve_theme(merged)
   validate_options(merged)
   return merged
 end
+
+M.defaults = M.merge()
+M.options = vim.deepcopy(M.defaults)
 
 function M.setup(opts)
   M.options = M.merge(opts)

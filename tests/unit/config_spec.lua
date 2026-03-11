@@ -38,6 +38,7 @@ return {
               changed = '#d29922',
               minimap_bg = '#111111',
               minimap_viewport_bg = '#2a2a2a',
+              minimap_cursor = '#C8C8C8',
               statusline_bg = '#101010',
               split = '#333333',
               deleted_old = '#3d1a1a',
@@ -125,6 +126,7 @@ return {
             },
           },
           theme = {
+            preset = 'one_light',
             palette = {
               logo = '#ffffff',
             },
@@ -144,14 +146,37 @@ return {
         A.equal(config.options.windows.filetree.width, 42)
         A.equal(config.options.windows.filetree.cursorline, true)
         A.equal(config.options.windows.diff.relativenumber, false)
+        A.equal(config.options.theme.preset, 'one_light')
         A.equal(config.options.theme.palette.logo, '#ffffff')
-        A.equal(config.options.theme.palette.bg, '#000000')
+        A.equal(config.options.theme.palette.bg, '#FAFAFA')
+        A.equal(config.options.theme.palette.keyword, '#A626A4')
+        A.equal(config.options.theme.palette.minimap_cursor, '#111111')
         A.equal(config.options.hunk_navigation.next, 'N')
         A.equal(config.options.hunk_navigation.prev, nil)
         A.equal(config.options.keymaps.quit, 'x')
         A.equal(config.options.keymaps.open_file, '<CR>')
         A.equal(config.options.minimap.enabled, false)
         A.equal(config.options.watch.enabled, true)
+      end,
+    },
+    {
+      name = 'theme preset resolves the built-in palette',
+      run = function()
+        local config = require('glance.config')
+        config.setup({
+          theme = {
+            preset = 'one_light',
+          },
+        })
+
+        A.equal(config.options.theme.preset, 'one_light')
+        A.equal(config.options.theme.palette.bg, '#FAFAFA')
+        A.equal(config.options.theme.palette.fg, '#383A42')
+        A.equal(config.options.theme.palette.statusline_bg, '#EAEAEB')
+        A.equal(config.options.theme.palette.logo, '#526FFF')
+        A.equal(config.options.theme.palette.minimap_cursor, '#111111')
+        A.equal(config.options.theme.palette.deleted_old, '#F4CCC8')
+        A.equal(config.options.theme.palette.added_new, '#CAE1CA')
       end,
     },
     {
@@ -217,6 +242,22 @@ return {
 
         A.falsy(ok)
         A.match(err, 'theme%.palette%.bg must be a hex color like #RRGGBB')
+      end,
+    },
+    {
+      name = 'unknown theme presets are rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            theme = {
+              preset = 'banana',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'unknown theme preset banana')
       end,
     },
     {

@@ -19,6 +19,9 @@ return {
   app = {
     hide_statusline = true,
   },
+  theme = {
+    preset = 'one_light',
+  },
   windows = {
     filetree = {
       width = 36,
@@ -51,6 +54,13 @@ Available config domains:
 - `minimap`
 - `watch`
 
+Built-in theme presets:
+
+- `seti_black`
+- `one_light`
+
+`theme.preset` selects a built-in palette, and `theme.palette` can override individual colors on top of that preset.
+
 The welcome screen is always part of startup. `welcome` only controls its animation timing, not whether it appears.
 
 ## Roadmap
@@ -58,7 +68,6 @@ The welcome screen is always part of startup. `welcome` only controls its animat
 - [x] Add tests
 - [x] Hide statusline config option
 - [x] Yellow glance logo
-- [ ] Add a white theme preset
+- [x] Add a white theme preset
 - [ ] When free scrolling on left-hand side pane, right-hand side pane doesn't move, but reverse isn't true
-- [ ] Make minimap clickable
 - [ ] Verify all the code
