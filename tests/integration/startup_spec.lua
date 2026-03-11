@@ -75,7 +75,7 @@ return {
           A.equal(vim.o.hidden, false)
           A.equal(vim.o.smoothscroll, true)
           A.equal(vim.o.laststatus, 3)
-          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.filetree_width)
+          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.windows.filetree.width)
           A.truthy(next(vim.api.nvim_get_hl(0, { name = 'GlanceSectionHeader', link = false })) ~= nil)
         end)
       end,
@@ -87,7 +87,11 @@ return {
           local glance = require('glance')
 
           vim.o.laststatus = 3
-          glance.setup({ hide_statusline = true })
+          glance.setup({
+            app = {
+              hide_statusline = true,
+            },
+          })
           glance.start()
 
           A.equal(vim.o.laststatus, 0)

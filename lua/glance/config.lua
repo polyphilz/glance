@@ -1,9 +1,208 @@
 local M = {}
 
+local VALID_SIGNCOLUMN = {
+  no = true,
+  yes = true,
+  auto = true,
+  number = true,
+}
+
+local ALLOWED_TOP_LEVEL = {
+  app = true,
+  theme = true,
+  windows = true,
+  keymaps = true,
+  hunk_navigation = true,
+  signs = true,
+  welcome = true,
+  minimap = true,
+  watch = true,
+}
+
+local ALLOWED_APP = {
+  hide_statusline = true,
+  colorscheme = true,
+  termguicolors = true,
+  smoothscroll = true,
+  mousescroll = true,
+  checktime = true,
+  autoread = true,
+  hidden = true,
+}
+
+local ALLOWED_THEME = {
+  preset = true,
+  palette = true,
+}
+
+local ALLOWED_THEME_PALETTE = {
+  bg = true,
+  fg = true,
+  muted = true,
+  string = true,
+  keyword = true,
+  func = true,
+  type = true,
+  number = true,
+  accent = true,
+  selection = true,
+  line_highlight = true,
+  logo = true,
+  added = true,
+  deleted = true,
+  changed = true,
+  minimap_bg = true,
+  minimap_viewport_bg = true,
+  statusline_bg = true,
+  split = true,
+  deleted_old = true,
+  deleted_old_text = true,
+  added_new = true,
+  added_new_text = true,
+  diff_change = true,
+  diff_text = true,
+  untracked = true,
+  line_nr = true,
+  folded = true,
+}
+
+local ALLOWED_WINDOWS = {
+  filetree = true,
+  diff = true,
+  welcome = true,
+}
+
+local ALLOWED_FILETREE_WINDOW = {
+  width = true,
+  number = true,
+  relativenumber = true,
+  signcolumn = true,
+  cursorline = true,
+  winfixwidth = true,
+}
+
+local ALLOWED_DIFF_WINDOW = {
+  number = true,
+  relativenumber = true,
+  signcolumn = true,
+  cursorline = true,
+  foldenable = true,
+}
+
+local ALLOWED_WELCOME_WINDOW = {
+  number = true,
+  relativenumber = true,
+  signcolumn = true,
+  cursorline = true,
+}
+
+local ALLOWED_KEYMAPS = {
+  open_file = true,
+  quit = true,
+  refresh = true,
+  next_section = true,
+  prev_section = true,
+  toggle_filetree = true,
+}
+
+local ALLOWED_HUNK_NAVIGATION = {
+  next = true,
+  prev = true,
+}
+
+local ALLOWED_SIGNS = {
+  modified = true,
+  added = true,
+  deleted = true,
+  renamed = true,
+  untracked = true,
+}
+
+local ALLOWED_WELCOME = {
+  animate = true,
+  frame_ms = true,
+}
+
+local ALLOWED_MINIMAP = {
+  enabled = true,
+  width = true,
+  winblend = true,
+  zindex = true,
+  debounce_ms = true,
+}
+
+local ALLOWED_WATCH = {
+  enabled = true,
+  interval_ms = true,
+}
+
 M.defaults = {
-  filetree_width = 30,
-  hide_statusline = false,
-  hunk_navigation = {},
+  app = {
+    hide_statusline = false,
+    colorscheme = 'default',
+    termguicolors = true,
+    smoothscroll = true,
+    mousescroll = 'ver:1,hor:1',
+    checktime = true,
+    autoread = true,
+    hidden = false,
+  },
+  theme = {
+    preset = 'seti_black',
+    palette = {
+      bg = '#000000',
+      fg = '#D7D7D7',
+      muted = '#677A83',
+      string = '#E6DB74',
+      keyword = '#F92672',
+      func = '#A6E22E',
+      type = '#66D9EF',
+      number = '#AE81FF',
+      accent = '#FD971F',
+      selection = '#444444',
+      line_highlight = '#333333',
+      logo = '#F2E94B',
+      added = '#2ea043',
+      deleted = '#f85149',
+      changed = '#d29922',
+      minimap_bg = '#111111',
+      minimap_viewport_bg = '#2a2a2a',
+      statusline_bg = '#101010',
+      split = '#333333',
+      deleted_old = '#3d1a1a',
+      deleted_old_text = '#6b2c2c',
+      added_new = '#1a3d1a',
+      added_new_text = '#2b6b2b',
+      diff_change = '#2b2b00',
+      diff_text = '#4a4a00',
+      untracked = '#808080',
+      line_nr = '#555555',
+      folded = '#1a1a1a',
+    },
+  },
+  windows = {
+    filetree = {
+      width = 30,
+      number = false,
+      relativenumber = false,
+      signcolumn = 'no',
+      cursorline = true,
+      winfixwidth = true,
+    },
+    diff = {
+      number = true,
+      relativenumber = true,
+      signcolumn = 'no',
+      cursorline = false,
+      foldenable = false,
+    },
+    welcome = {
+      number = false,
+      relativenumber = false,
+      signcolumn = 'no',
+      cursorline = false,
+    },
+  },
   keymaps = {
     open_file = '<CR>',
     quit = 'q',
@@ -12,6 +211,7 @@ M.defaults = {
     prev_section = 'K',
     toggle_filetree = '<Tab>',
   },
+  hunk_navigation = {},
   signs = {
     modified = 'M',
     added = 'A',
@@ -19,9 +219,137 @@ M.defaults = {
     renamed = 'R',
     untracked = '?',
   },
+  welcome = {
+    animate = true,
+    frame_ms = 150,
+  },
+  minimap = {
+    enabled = true,
+    width = 1,
+    winblend = 0,
+    zindex = 50,
+    debounce_ms = 16,
+  },
+  watch = {
+    enabled = true,
+    interval_ms = 200,
+  },
 }
 
 M.options = vim.deepcopy(M.defaults)
+
+local function fail(message)
+  error('glance: ' .. message)
+end
+
+local function validate_known_keys(tbl, allowed, prefix)
+  for key in pairs(tbl) do
+    if not allowed[key] then
+      fail('unknown config key ' .. prefix .. '.' .. key)
+    end
+  end
+end
+
+local function validate_boolean(value, name)
+  if type(value) ~= 'boolean' then
+    fail(name .. ' must be a boolean')
+  end
+end
+
+local function validate_string(value, name)
+  if type(value) ~= 'string' then
+    fail(name .. ' must be a string')
+  end
+end
+
+local function validate_hex_color(value, name)
+  if type(value) ~= 'string' or not value:match('^#%x%x%x%x%x%x$') then
+    fail(name .. ' must be a hex color like #RRGGBB')
+  end
+end
+
+local function validate_integer(value, name, min_value)
+  if type(value) ~= 'number' or value < min_value or value % 1 ~= 0 then
+    if min_value == 0 then
+      fail(name .. ' must be a non-negative integer')
+    else
+      fail(name .. ' must be an integer >= ' .. min_value)
+    end
+  end
+end
+
+local function validate_signcolumn(value, name)
+  if VALID_SIGNCOLUMN[value] then
+    return
+  end
+  if type(value) == 'string' and value:match('^yes:%d+$') then
+    return
+  end
+  if type(value) == 'string' and value:match('^auto:%d+$') then
+    return
+  end
+  if type(value) == 'string' and value:match('^auto:%d+%-%d+$') then
+    return
+  end
+  fail(name .. ' must be a valid signcolumn value')
+end
+
+local function validate_window_options(window_name, options, allowed)
+  validate_known_keys(options, allowed, window_name)
+  validate_boolean(options.number, window_name .. '.number')
+  validate_boolean(options.relativenumber, window_name .. '.relativenumber')
+  validate_signcolumn(options.signcolumn, window_name .. '.signcolumn')
+  validate_boolean(options.cursorline, window_name .. '.cursorline')
+end
+
+local function validate_app(options)
+  local app = options.app
+  validate_known_keys(app, ALLOWED_APP, 'app')
+  validate_boolean(app.hide_statusline, 'app.hide_statusline')
+  if app.colorscheme ~= nil then
+    validate_string(app.colorscheme, 'app.colorscheme')
+  end
+  validate_boolean(app.termguicolors, 'app.termguicolors')
+  validate_boolean(app.smoothscroll, 'app.smoothscroll')
+  validate_string(app.mousescroll, 'app.mousescroll')
+  validate_boolean(app.checktime, 'app.checktime')
+  validate_boolean(app.autoread, 'app.autoread')
+  validate_boolean(app.hidden, 'app.hidden')
+end
+
+local function validate_theme(options)
+  local theme = options.theme
+  validate_known_keys(theme, ALLOWED_THEME, 'theme')
+  validate_string(theme.preset, 'theme.preset')
+  validate_known_keys(theme.palette, ALLOWED_THEME_PALETTE, 'theme.palette')
+  for key, value in pairs(theme.palette) do
+    validate_hex_color(value, 'theme.palette.' .. key)
+  end
+end
+
+local function validate_windows(options)
+  local windows = options.windows
+  validate_known_keys(windows, ALLOWED_WINDOWS, 'windows')
+
+  local filetree = windows.filetree
+  validate_window_options('windows.filetree', filetree, ALLOWED_FILETREE_WINDOW)
+  validate_integer(filetree.width, 'windows.filetree.width', 1)
+  validate_boolean(filetree.winfixwidth, 'windows.filetree.winfixwidth')
+
+  local diff = windows.diff
+  validate_window_options('windows.diff', diff, ALLOWED_DIFF_WINDOW)
+  validate_boolean(diff.foldenable, 'windows.diff.foldenable')
+
+  validate_window_options('windows.welcome', windows.welcome, ALLOWED_WELCOME_WINDOW)
+end
+
+local function validate_keymaps(options)
+  local keymaps = options.keymaps
+  validate_known_keys(keymaps, ALLOWED_KEYMAPS, 'keymaps')
+  for key, value in pairs(keymaps) do
+    validate_string(value, 'keymaps.' .. key)
+  end
+end
 
 local function validate_hunk_navigation(options)
   local hunk = options.hunk_navigation or {}
@@ -29,27 +357,81 @@ local function validate_hunk_navigation(options)
   local prev_key = hunk.prev
   local toggle_key = options.keymaps and options.keymaps.toggle_filetree or nil
 
+  validate_known_keys(hunk, ALLOWED_HUNK_NAVIGATION, 'hunk_navigation')
+
   if next_key ~= nil and type(next_key) ~= 'string' then
-    error('glance: hunk_navigation.next must be a string or nil')
+    fail('hunk_navigation.next must be a string or nil')
   end
   if prev_key ~= nil and type(prev_key) ~= 'string' then
-    error('glance: hunk_navigation.prev must be a string or nil')
+    fail('hunk_navigation.prev must be a string or nil')
   end
   if next_key ~= nil and prev_key ~= nil and next_key == prev_key then
-    error('glance: hunk_navigation.next and hunk_navigation.prev must be different')
+    fail('hunk_navigation.next and hunk_navigation.prev must be different')
   end
   if next_key ~= nil and next_key == toggle_key then
-    error('glance: hunk_navigation.next conflicts with keymaps.toggle_filetree')
+    fail('hunk_navigation.next conflicts with keymaps.toggle_filetree')
   end
   if prev_key ~= nil and prev_key == toggle_key then
-    error('glance: hunk_navigation.prev conflicts with keymaps.toggle_filetree')
+    fail('hunk_navigation.prev conflicts with keymaps.toggle_filetree')
   end
 end
 
+local function validate_signs(options)
+  local signs = options.signs
+  validate_known_keys(signs, ALLOWED_SIGNS, 'signs')
+  for key, value in pairs(signs) do
+    validate_string(value, 'signs.' .. key)
+  end
+end
+
+local function validate_welcome(options)
+  local welcome = options.welcome
+  validate_known_keys(welcome, ALLOWED_WELCOME, 'welcome')
+  validate_boolean(welcome.animate, 'welcome.animate')
+  validate_integer(welcome.frame_ms, 'welcome.frame_ms', 0)
+end
+
+local function validate_minimap(options)
+  local minimap = options.minimap
+  validate_known_keys(minimap, ALLOWED_MINIMAP, 'minimap')
+  validate_boolean(minimap.enabled, 'minimap.enabled')
+  validate_integer(minimap.width, 'minimap.width', 1)
+  validate_integer(minimap.winblend, 'minimap.winblend', 0)
+  if minimap.winblend > 100 then
+    fail('minimap.winblend must be <= 100')
+  end
+  validate_integer(minimap.zindex, 'minimap.zindex', 1)
+  validate_integer(minimap.debounce_ms, 'minimap.debounce_ms', 0)
+end
+
+local function validate_watch(options)
+  local watch = options.watch
+  validate_known_keys(watch, ALLOWED_WATCH, 'watch')
+  validate_boolean(watch.enabled, 'watch.enabled')
+  validate_integer(watch.interval_ms, 'watch.interval_ms', 0)
+end
+
+local function validate_options(options)
+  validate_known_keys(options, ALLOWED_TOP_LEVEL, 'config')
+  validate_app(options)
+  validate_theme(options)
+  validate_windows(options)
+  validate_keymaps(options)
+  validate_hunk_navigation(options)
+  validate_signs(options)
+  validate_welcome(options)
+  validate_minimap(options)
+  validate_watch(options)
+end
+
+function M.merge(opts)
+  local merged = vim.tbl_deep_extend('force', vim.deepcopy(M.defaults), opts or {})
+  validate_options(merged)
+  return merged
+end
+
 function M.setup(opts)
-  local merged = vim.tbl_deep_extend('force', M.defaults, opts or {})
-  validate_hunk_navigation(merged)
-  M.options = merged
+  M.options = M.merge(opts)
 end
 
 return M

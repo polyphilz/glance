@@ -7,6 +7,7 @@
 --- 2x vertical resolution per terminal row.
 
 local M = {}
+local config = require('glance.config')
 local logic = require('glance.minimap_logic')
 
 local ns = vim.api.nvim_create_namespace('glance_minimap')
@@ -20,6 +21,7 @@ M.cached_pixels = nil   -- cached pixel states (only recomputed on content chang
 M.pixel_count = 0
 M.total_logical = 0
 M.augroup = vim.api.nvim_create_augroup('GlanceMinimap', { clear = true })
+M.debounce_timer = nil
 
 -- Diff state constants
 local NONE = logic.states.NONE
@@ -28,25 +30,37 @@ local DELETE = logic.states.DELETE
 local CHANGE = logic.states.CHANGE
 local CURSOR = logic.states.CURSOR
 
--- Colors: muted for out-of-viewport, brighter for in-viewport
-local COLORS = {
-  [NONE]   = '#111111',
-  [ADD]    = '#2ea043',
-  [DELETE] = '#f85149',
-  [CHANGE] = '#d29922',
-  [CURSOR] = '#C8C8C8',
-}
-
-local VP_COLORS = {
-  [NONE]   = '#2a2a2a',
-  [ADD]    = '#2ea043',
-  [DELETE] = '#f85149',
-  [CHANGE] = '#d29922',
-  [CURSOR] = '#C8C8C8',
-}
-
 -- Dynamic highlight group cache
 local hl_cache = {}
+
+local function minimap_config()
+  return config.options.minimap
+end
+
+local function colors()
+  local palette = config.options.theme.palette
+  return {
+    [NONE] = palette.minimap_bg,
+    [ADD] = palette.added,
+    [DELETE] = palette.deleted,
+    [CHANGE] = palette.changed,
+    [CURSOR] = '#C8C8C8',
+  }, {
+    [NONE] = palette.minimap_viewport_bg,
+    [ADD] = palette.added,
+    [DELETE] = palette.deleted,
+    [CHANGE] = palette.changed,
+    [CURSOR] = '#C8C8C8',
+  }
+end
+
+local function close_debounce_timer()
+  if M.debounce_timer then
+    M.debounce_timer:stop()
+    M.debounce_timer:close()
+    M.debounce_timer = nil
+  end
+end
 
 --- Get or create a highlight group for a half-block cell.
 --- fg = top pixel color, bg = bottom pixel color.
@@ -55,8 +69,9 @@ local function get_hl(top_state, bot_state, top_vp, bot_vp)
   if hl_cache[key] then return hl_cache[key] end
 
   local name = 'GlanceMm' .. key
-  local fg_pal = top_vp and VP_COLORS or COLORS
-  local bg_pal = bot_vp and VP_COLORS or COLORS
+  local base_colors, viewport_colors = colors()
+  local fg_pal = top_vp and viewport_colors or base_colors
+  local bg_pal = bot_vp and viewport_colors or base_colors
 
   vim.api.nvim_set_hl(0, name, {
     fg = fg_pal[top_state],
@@ -141,7 +156,7 @@ function M.update_viewport()
     anchor = 'NE',
     row = 0,
     col = ww,
-    width = 1,
+    width = minimap_config().width,
     height = wh,
   })
 
@@ -186,6 +201,7 @@ end
 function M.open(target_win, old_lines)
   M.close()
 
+  if not minimap_config().enabled then return end
   if not target_win or not vim.api.nvim_win_is_valid(target_win) then return end
 
   M.target_win = target_win
@@ -207,15 +223,15 @@ function M.open(target_win, old_lines)
     anchor = 'NE',
     row = 0,
     col = ww,
-    width = 1,
+    width = minimap_config().width,
     height = wh,
     style = 'minimal',
     focusable = false,
-    zindex = 50,
+    zindex = minimap_config().zindex,
   })
 
   vim.api.nvim_win_set_option(M.win, 'winhighlight', 'Normal:GlanceMinimapBg,EndOfBuffer:GlanceMinimapBg')
-  vim.api.nvim_win_set_option(M.win, 'winblend', 0)
+  vim.api.nvim_win_set_option(M.win, 'winblend', minimap_config().winblend)
 
   -- Initial render
   M.full_update()
@@ -225,15 +241,17 @@ end
 --- Set up autocmds for scroll sync and content change tracking.
 function M.setup_autocmds()
   vim.api.nvim_clear_autocmds({ group = M.augroup })
-
-  local timer = nil
-  local DEBOUNCE = 16 -- ~60fps
+  close_debounce_timer()
 
   local function debounced_viewport()
-    if timer then timer:stop() end
-    timer = vim.uv.new_timer()
-    timer:start(DEBOUNCE, 0, vim.schedule_wrap(function()
+    close_debounce_timer()
+    M.debounce_timer = vim.uv.new_timer()
+    if not M.debounce_timer then
+      return
+    end
+    M.debounce_timer:start(minimap_config().debounce_ms, 0, vim.schedule_wrap(function()
       M.update_viewport()
+      close_debounce_timer()
     end))
   end
 
@@ -268,6 +286,7 @@ end
 --- Close and clean up the minimap.
 function M.close()
   vim.api.nvim_clear_autocmds({ group = M.augroup })
+  close_debounce_timer()
 
   if M.win and vim.api.nvim_win_is_valid(M.win) then
     vim.api.nvim_win_close(M.win, true)
@@ -294,7 +313,7 @@ end
 
 --- Define the background highlight for empty minimap regions.
 function M.setup_highlights()
-  vim.api.nvim_set_hl(0, 'GlanceMinimapBg', { bg = '#111111' })
+  vim.api.nvim_set_hl(0, 'GlanceMinimapBg', { bg = config.options.theme.palette.minimap_bg })
 end
 
 return M

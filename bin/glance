@@ -17,9 +17,6 @@ if ! git rev-parse --is-inside-work-tree &>/dev/null; then
 fi
 
 # Launch neovim in minimal mode with only the glance plugin
-# TODO: Move hunk_navigation into user-provided config once Glance has a real
-# config entrypoint instead of hardcoding personal defaults in the launcher.
 exec nvim --clean \
   --cmd "set rtp+=$GLANCE_ROOT" \
-  -c "lua require('glance').setup({ hide_statusline = true, hunk_navigation = { next = 'n', prev = 'N' } })" \
-  -c "Glance"
+  -c "lua require('glance.bootstrap').run()"

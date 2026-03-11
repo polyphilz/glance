@@ -146,6 +146,7 @@ return {
           }, '\n') .. '\n')
 
           require('glance').setup({
+            app = {},
             hunk_navigation = {
               next = 'N',
               prev = 'n',
@@ -183,6 +184,39 @@ return {
 
           A.truthy(has_next)
           A.truthy(has_prev)
+        end)
+      end,
+    },
+    {
+      name = 'diff window options and watch lifecycle follow config',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').setup({
+            windows = {
+              diff = {
+                number = false,
+                relativenumber = false,
+                signcolumn = 'yes',
+                cursorline = true,
+                foldenable = true,
+              },
+            },
+            watch = {
+              enabled = false,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+
+          A.equal(vim.api.nvim_get_option_value('number', { win = diffview.new_win }), false)
+          A.equal(vim.api.nvim_get_option_value('relativenumber', { win = diffview.new_win }), false)
+          A.equal(vim.api.nvim_get_option_value('signcolumn', { win = diffview.new_win }), 'yes')
+          A.equal(vim.api.nvim_get_option_value('cursorline', { win = diffview.new_win }), true)
+          A.equal(vim.api.nvim_get_option_value('foldenable', { win = diffview.new_win }), true)
+          A.equal(diffview.fs_watcher, nil)
         end)
       end,
     },

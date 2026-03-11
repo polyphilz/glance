@@ -83,5 +83,44 @@ return {
         end)
       end,
     },
+    {
+      name = 'minimap can be disabled via config',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').setup({
+            minimap = {
+              enabled = false,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          local minimap = require('glance.minimap')
+
+          ui.open_file(filetree.files.changes[1])
+          A.equal(minimap.win, nil)
+        end)
+      end,
+    },
+    {
+      name = 'minimap width follows config',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').setup({
+            minimap = {
+              width = 3,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          local minimap = require('glance.minimap')
+
+          ui.open_file(filetree.files.changes[1])
+          local config = vim.api.nvim_win_get_config(minimap.win)
+          A.equal(config.width, 3)
+        end)
+      end,
+    },
   },
 }

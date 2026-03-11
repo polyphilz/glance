@@ -1,7 +1,36 @@
 local M = {}
+local APP_AUGROUP = vim.api.nvim_create_augroup('GlanceApp', { clear = true })
 
 function M.setup(opts)
   require('glance.config').setup(opts)
+end
+
+local function apply_colorscheme(colorscheme)
+  if colorscheme == nil then
+    return
+  end
+
+  local ok, err = pcall(vim.cmd, 'colorscheme ' .. vim.fn.fnameescape(colorscheme))
+  if ok then
+    return
+  end
+
+  vim.notify('glance: failed to load colorscheme "' .. colorscheme .. '": ' .. err, vim.log.levels.WARN)
+  if colorscheme ~= 'default' then
+    pcall(vim.cmd, 'colorscheme default')
+  end
+end
+
+local function setup_checktime_autocmd(enabled)
+  vim.api.nvim_clear_autocmds({ group = APP_AUGROUP })
+  if not enabled then
+    return
+  end
+
+  vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold' }, {
+    group = APP_AUGROUP,
+    command = 'silent! checktime',
+  })
 end
 
 function M.start()
@@ -9,6 +38,7 @@ function M.start()
   local git = require('glance.git')
   local ui = require('glance.ui')
   local filetree = require('glance.filetree')
+  local app = config.options.app
 
   -- Verify we're in a git repo
   if not git.is_repo() then
@@ -17,24 +47,19 @@ function M.start()
     return
   end
 
-  -- Set up essential options
-  vim.opt.termguicolors = true
-  vim.opt.number = true
-  vim.opt.relativenumber = true
-  vim.opt.signcolumn = 'yes'
-  vim.opt.autoread = true
-  vim.opt.hidden = false
-  vim.opt.smoothscroll = true
-  vim.opt.mousescroll = 'ver:1,hor:1'
-  if config.options.hide_statusline then
+  -- Set up essential app-owned options
+  vim.opt.termguicolors = app.termguicolors
+  vim.opt.autoread = app.autoread
+  vim.opt.hidden = app.hidden
+  vim.opt.smoothscroll = app.smoothscroll
+  vim.opt.mousescroll = app.mousescroll
+  if app.hide_statusline then
     vim.opt.laststatus = 0
   end
 
   -- Auto-detect external file changes (e.g. edits from Cursor/VS Code)
-  vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold' }, {
-    command = 'silent! checktime',
-  })
-  vim.cmd('colorscheme default')
+  setup_checktime_autocmd(app.checktime)
+  apply_colorscheme(app.colorscheme)
 
   -- Apply highlights AFTER colorscheme so they aren't overwritten
   M.setup_highlights()
@@ -59,33 +84,33 @@ function M.start()
 end
 
 function M.setup_highlights()
-  -- Seti Black palette
-  local bg = '#000000'
-  local fg = '#D7D7D7'
-  local comment = '#677A83'
-  local string = '#E6DB74'
-  local keyword = '#F92672'
-  local func = '#A6E22E'
-  local type_color = '#66D9EF'
-  local number = '#AE81FF'
-  local param = '#FD971F'
-  local selection = '#444444'
-  local line_hl = '#333333'
+  local palette = require('glance.config').options.theme.palette
+  local bg = palette.bg
+  local fg = palette.fg
+  local comment = palette.muted
+  local string = palette.string
+  local keyword = palette.keyword
+  local func = palette.func
+  local type_color = palette.type
+  local number = palette.number
+  local param = palette.accent
+  local selection = palette.selection
+  local line_hl = palette.line_highlight
 
   -- Editor
   vim.api.nvim_set_hl(0, 'Normal', { bg = bg, fg = fg })
   vim.api.nvim_set_hl(0, 'NormalNC', { bg = bg, fg = fg })
   vim.api.nvim_set_hl(0, 'CursorLine', { bg = line_hl })
   vim.api.nvim_set_hl(0, 'Visual', { bg = selection })
-  vim.api.nvim_set_hl(0, 'LineNr', { fg = '#555555', bg = bg })
+  vim.api.nvim_set_hl(0, 'LineNr', { fg = palette.line_nr, bg = bg })
   vim.api.nvim_set_hl(0, 'CursorLineNr', { fg = param, bg = bg, bold = true })
   vim.api.nvim_set_hl(0, 'SignColumn', { bg = bg })
-  vim.api.nvim_set_hl(0, 'VertSplit', { fg = '#333333', bg = bg })
-  vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#333333', bg = bg })
-  vim.api.nvim_set_hl(0, 'StatusLine', { fg = fg, bg = '#101010' })
-  vim.api.nvim_set_hl(0, 'StatusLineNC', { fg = comment, bg = '#101010' })
+  vim.api.nvim_set_hl(0, 'VertSplit', { fg = palette.split, bg = bg })
+  vim.api.nvim_set_hl(0, 'WinSeparator', { fg = palette.split, bg = bg })
+  vim.api.nvim_set_hl(0, 'StatusLine', { fg = fg, bg = palette.statusline_bg })
+  vim.api.nvim_set_hl(0, 'StatusLineNC', { fg = comment, bg = palette.statusline_bg })
   vim.api.nvim_set_hl(0, 'EndOfBuffer', { fg = bg, bg = bg })
-  vim.api.nvim_set_hl(0, 'Folded', { fg = comment, bg = '#1a1a1a' })
+  vim.api.nvim_set_hl(0, 'Folded', { fg = comment, bg = palette.folded })
   vim.api.nvim_set_hl(0, 'FoldColumn', { fg = comment, bg = bg })
 
   -- Syntax (vim's built-in highlight groups, used by tree-sitter too)
@@ -137,16 +162,16 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, '@tag.attribute', { fg = func })
 
   -- Diff highlights
-  vim.api.nvim_set_hl(0, 'DiffAdd', { bg = '#1a3d1a' })
-  vim.api.nvim_set_hl(0, 'DiffDelete', { bg = '#3d1a1a' })
-  vim.api.nvim_set_hl(0, 'DiffChange', { bg = '#2b2b00' })
-  vim.api.nvim_set_hl(0, 'DiffText', { bg = '#4a4a00', bold = true })
+  vim.api.nvim_set_hl(0, 'DiffAdd', { bg = palette.added_new })
+  vim.api.nvim_set_hl(0, 'DiffDelete', { bg = palette.deleted_old })
+  vim.api.nvim_set_hl(0, 'DiffChange', { bg = palette.diff_change })
+  vim.api.nvim_set_hl(0, 'DiffText', { bg = palette.diff_text, bold = true })
 
   -- Per-pane diff highlights (old=red, new=green) applied via winhighlight
-  vim.api.nvim_set_hl(0, 'GlanceDiffChangeOld', { bg = '#3d1a1a' })
-  vim.api.nvim_set_hl(0, 'GlanceDiffTextOld', { bg = '#6b2c2c', bold = true })
-  vim.api.nvim_set_hl(0, 'GlanceDiffChangeNew', { bg = '#1a3d1a' })
-  vim.api.nvim_set_hl(0, 'GlanceDiffTextNew', { bg = '#2b6b2b', bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceDiffChangeOld', { bg = palette.deleted_old })
+  vim.api.nvim_set_hl(0, 'GlanceDiffTextOld', { bg = palette.deleted_old_text, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceDiffChangeNew', { bg = palette.added_new })
+  vim.api.nvim_set_hl(0, 'GlanceDiffTextNew', { bg = palette.added_new_text, bold = true })
 
   -- File tree highlights
   vim.api.nvim_set_hl(0, 'GlanceSectionHeader', { bold = true, fg = comment })
@@ -154,7 +179,7 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceStatusA', { fg = func })
   vim.api.nvim_set_hl(0, 'GlanceStatusD', { fg = keyword })
   vim.api.nvim_set_hl(0, 'GlanceStatusR', { fg = type_color })
-  vim.api.nvim_set_hl(0, 'GlanceStatusU', { fg = '#808080' })
+  vim.api.nvim_set_hl(0, 'GlanceStatusU', { fg = palette.untracked })
   vim.api.nvim_set_hl(0, 'GlanceActiveFile', { bg = selection })
 
   -- Minimap highlights
@@ -162,6 +187,7 @@ function M.setup_highlights()
   require('glance.ui').setup_welcome_highlights({
     base = comment,
     bright = fg,
+    logo = palette.logo,
   })
 end
 

@@ -26,7 +26,7 @@ return {
 
           A.truthy(logo_line)
           A.equal(string.format('#%06x', logo_hl.fg), string.lower('#F2E94B'))
-          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.filetree_width)
+          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.windows.filetree.width)
           A.equal(vim.api.nvim_get_current_win(), filetree.win)
         end)
       end,
@@ -114,7 +114,7 @@ return {
 
           A.falsy(ui.diff_open)
           A.truthy(ui.welcome_win and vim.api.nvim_win_is_valid(ui.welcome_win))
-          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.filetree_width)
+          A.equal(vim.api.nvim_win_get_width(filetree.win), config.options.windows.filetree.width)
           A.equal(filetree.files.changes[1].path, 'tracked.txt')
         end)
       end,

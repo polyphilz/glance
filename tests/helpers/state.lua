@@ -79,6 +79,7 @@ function M.reset()
   end
 
   if minimap then
+    close_handle(minimap.debounce_timer)
     minimap.buf = nil
     minimap.win = nil
     minimap.target_win = nil
@@ -86,6 +87,7 @@ function M.reset()
     minimap.cached_pixels = nil
     minimap.pixel_count = 0
     minimap.total_logical = 0
+    minimap.debounce_timer = nil
   end
 
   if ui then

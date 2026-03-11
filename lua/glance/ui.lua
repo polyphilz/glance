@@ -4,12 +4,7 @@ local filetree = require('glance.filetree')
 local M = {}
 
 local ns = vim.api.nvim_create_namespace('glance_welcome')
-local WELCOME_FRAME_MS = 150
-local TEXT_LOGO = {
-  text = 'glance',
-  width = #'glance',
-  height = 1,
-}
+local LOGO_TEXT = 'glance'
 
 local STAR_FRAMES = {
   { char = '.', hl = 'GlanceWelcomeStar0' },
@@ -60,7 +55,33 @@ function M.setup_welcome_highlights(palette)
 end
 
 local function select_logo()
-  return TEXT_LOGO
+  return {
+    text = LOGO_TEXT,
+    width = #LOGO_TEXT,
+    height = 1,
+  }
+end
+
+local function filetree_options()
+  return config.options.windows.filetree
+end
+
+local function welcome_options()
+  return config.options.windows.welcome
+end
+
+local function welcome_config()
+  return config.options.welcome
+end
+
+local function apply_window_options(win, options)
+  vim.api.nvim_win_set_option(win, 'number', options.number)
+  vim.api.nvim_win_set_option(win, 'relativenumber', options.relativenumber)
+  vim.api.nvim_win_set_option(win, 'signcolumn', options.signcolumn)
+  vim.api.nvim_win_set_option(win, 'cursorline', options.cursorline)
+  if options.winfixwidth ~= nil then
+    vim.api.nvim_win_set_option(win, 'winfixwidth', options.winfixwidth)
+  end
 end
 
 local function fract(value)
@@ -210,12 +231,17 @@ end
 local function start_welcome_animation()
   stop_welcome_animation()
   M.animation_tick = 0
+  if not welcome_config().animate then
+    return
+  end
+
   M.welcome_timer = vim.uv.new_timer()
   if not M.welcome_timer then
     return
   end
 
-  M.welcome_timer:start(WELCOME_FRAME_MS, WELCOME_FRAME_MS, vim.schedule_wrap(function()
+  local frame_ms = welcome_config().frame_ms
+  M.welcome_timer:start(frame_ms, frame_ms, vim.schedule_wrap(function()
     if not M.welcome_buf or not vim.api.nvim_buf_is_valid(M.welcome_buf) then
       stop_welcome_animation()
       return
@@ -246,13 +272,10 @@ function M.show_welcome()
   end
 
   -- Window options
-  vim.api.nvim_win_set_option(M.welcome_win, 'number', false)
-  vim.api.nvim_win_set_option(M.welcome_win, 'relativenumber', false)
-  vim.api.nvim_win_set_option(M.welcome_win, 'signcolumn', 'no')
-  vim.api.nvim_win_set_option(M.welcome_win, 'cursorline', false)
+  apply_window_options(M.welcome_win, welcome_options())
 
   -- Constrain filetree to its fixed width after the split
-  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
+  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
 
   render_welcome()
   start_welcome_animation()
@@ -314,12 +337,9 @@ function M.setup_layout()
   end
 
   -- Set file tree window options
-  vim.api.nvim_win_set_option(win, 'number', false)
-  vim.api.nvim_win_set_option(win, 'relativenumber', false)
-  vim.api.nvim_win_set_option(win, 'signcolumn', 'no')
-  vim.api.nvim_win_set_option(win, 'cursorline', true)
-  vim.api.nvim_win_set_width(win, config.options.filetree_width)
-  vim.api.nvim_win_set_option(win, 'winfixwidth', true)
+  local tree = filetree_options()
+  apply_window_options(win, tree)
+  vim.api.nvim_win_set_width(win, tree.width)
 
   -- Show welcome pane
   M.show_welcome()
@@ -371,8 +391,11 @@ function M.close_diff()
   -- Re-focus and resize the file tree
   if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
     vim.api.nvim_set_current_win(filetree.win)
-    vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
-    vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+    local tree = filetree_options()
+    vim.api.nvim_win_set_width(filetree.win, tree.width)
+    if tree.winfixwidth ~= nil then
+      vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', tree.winfixwidth)
+    end
   end
 
   -- Show welcome pane again

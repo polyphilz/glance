@@ -179,6 +179,7 @@ function M.run_headless(commands, opts)
   vim.fn.mkdir(temp_root .. '/state', 'p')
   vim.fn.mkdir(temp_root .. '/data', 'p')
   vim.fn.mkdir(temp_root .. '/cache', 'p')
+  local lua_root = paths.root .. '/lua'
 
   local command = {
     'env',
@@ -201,7 +202,9 @@ function M.run_headless(commands, opts)
     '-i',
     'NONE',
     '--cmd',
-    'set rtp+=' .. paths.root,
+    'lua vim.opt.runtimepath:append([[' .. paths.root .. ']])',
+    '--cmd',
+    'lua package.path = package.path .. ";' .. lua_root .. '/?.lua;' .. lua_root .. '/?/init.lua"',
     '--cmd',
     'set noswapfile',
   })

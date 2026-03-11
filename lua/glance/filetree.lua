@@ -10,6 +10,31 @@ M.line_map = {}      -- Maps buffer line number -> file object (nil for headers/
 M.active_file = nil  -- Currently viewed file in diff mode
 M.selected_line = nil -- Tracks the cursor line set by j/k/J/K navigation
 
+local function filetree_options()
+  return config.options.windows.filetree
+end
+
+local function apply_window_options(win)
+  local options = filetree_options()
+  vim.api.nvim_win_set_option(win, 'number', options.number)
+  vim.api.nvim_win_set_option(win, 'relativenumber', options.relativenumber)
+  vim.api.nvim_win_set_option(win, 'signcolumn', options.signcolumn)
+  vim.api.nvim_win_set_option(win, 'cursorline', options.cursorline)
+  vim.api.nvim_win_set_option(win, 'winfixwidth', options.winfixwidth)
+end
+
+local function status_text(status)
+  local signs = config.options.signs
+  local map = {
+    M = signs.modified,
+    A = signs.added,
+    D = signs.deleted,
+    R = signs.renamed,
+    ['?'] = signs.untracked,
+  }
+  return map[status] or status
+end
+
 --- Create the file tree buffer with appropriate settings.
 function M.create_buf()
   local buf = vim.api.nvim_create_buf(false, true)
@@ -83,7 +108,7 @@ function M.render(files)
       if file.old_path then
         display_path = file.old_path .. ' → ' .. file.path
       end
-      local line = '    ' .. file.status .. ' ' .. display_path
+      local line = '    ' .. status_text(file.status) .. ' ' .. display_path
       table.insert(lines, line)
       M.line_map[#lines] = file
 
@@ -314,12 +339,8 @@ function M.toggle()
     M.win = new_win
 
     -- Reapply window options
-    vim.api.nvim_win_set_option(M.win, 'number', false)
-    vim.api.nvim_win_set_option(M.win, 'relativenumber', false)
-    vim.api.nvim_win_set_option(M.win, 'signcolumn', 'no')
-    vim.api.nvim_win_set_option(M.win, 'cursorline', true)
-    vim.api.nvim_win_set_width(M.win, config.options.filetree_width)
-    vim.api.nvim_win_set_option(M.win, 'winfixwidth', true)
+    apply_window_options(M.win)
+    vim.api.nvim_win_set_width(M.win, filetree_options().width)
 
     diffview.equalize_panes()
 

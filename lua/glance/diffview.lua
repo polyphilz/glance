@@ -13,6 +13,22 @@ M.fs_watcher = nil
 M.closing = false
 M.autocmd_group = vim.api.nvim_create_augroup('GlanceDiffView', { clear = true })
 
+local function filetree_options()
+  return config.options.windows.filetree
+end
+
+local function diff_options()
+  return config.options.windows.diff
+end
+
+local function minimap_options()
+  return config.options.minimap
+end
+
+local function watch_options()
+  return config.options.watch
+end
+
 --- Open a standard 2-pane side-by-side diff for a modified file.
 function M.open(file)
   local root = git.repo_root()
@@ -35,8 +51,8 @@ function M.open(file)
   local old_lines = git.get_file_content(old_content_path, old_ref)
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
 
   -- Create the old (left) pane: vertical split to the right of file tree
   vim.api.nvim_set_current_win(filetree.win)
@@ -107,8 +123,8 @@ function M.open(file)
   vim.cmd('diffthis')
 
   -- Disable diff folding (must be after diffthis which forces foldenable=true)
-  vim.api.nvim_win_set_option(M.old_win, 'foldenable', false)
-  vim.api.nvim_win_set_option(M.new_win, 'foldenable', false)
+  vim.api.nvim_win_set_option(M.old_win, 'foldenable', diff_options().foldenable)
+  vim.api.nvim_win_set_option(M.new_win, 'foldenable', diff_options().foldenable)
 
   -- Per-pane diff colors: old=red tones, new=green tones (like VS Code/Cursor)
   vim.api.nvim_win_set_option(M.old_win, 'winhighlight',
@@ -123,7 +139,7 @@ function M.open(file)
   vim.api.nvim_set_current_win(M.new_win)
 
   -- Watch for external changes to the file
-  if file.section ~= 'staged' then
+  if file.section ~= 'staged' and watch_options().enabled then
     M.watch_file(full_path)
   end
 
@@ -132,8 +148,10 @@ function M.open(file)
   M.bind_buffer_keymaps()
 
   -- Open diff minimap on the new (right) pane
-  local minimap = require('glance.minimap')
-  minimap.open(M.new_win, old_lines)
+  if minimap_options().enabled then
+    local minimap = require('glance.minimap')
+    minimap.open(M.new_win, old_lines)
+  end
 end
 
 --- Open a single read-only pane for a deleted file.
@@ -148,8 +166,8 @@ function M.open_deleted(file)
   local lines = git.get_file_content(file.path, old_ref)
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
 
   -- Create a single pane
   vim.api.nvim_set_current_win(filetree.win)
@@ -184,8 +202,8 @@ function M.open_untracked(file)
   if not root then return end
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, config.options.filetree_width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', true)
+  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
 
   -- Create a single pane and open the file
   vim.api.nvim_set_current_win(filetree.win)
@@ -208,7 +226,7 @@ function M.watch_file(path)
   local w = vim.uv.new_fs_poll()
   if not w then return end
   M.fs_watcher = w
-  w:start(path, 200, function(err)
+  w:start(path, watch_options().interval_ms, function(err)
     if err then return end
     vim.schedule(function()
       if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
@@ -486,7 +504,7 @@ function M.equalize_panes()
   local tree_width = 0
 
   if tree_visible then
-    tree_width = config.options.filetree_width
+    tree_width = filetree_options().width
     vim.api.nvim_win_set_width(filetree.win, tree_width)
   end
 
@@ -504,10 +522,12 @@ end
 
 --- Apply standard window options to a diff pane (line numbers, etc).
 function M.set_win_options(win)
-  vim.api.nvim_win_set_option(win, 'number', true)
-  vim.api.nvim_win_set_option(win, 'relativenumber', true)
-  vim.api.nvim_win_set_option(win, 'signcolumn', 'no')
-  vim.api.nvim_win_set_option(win, 'cursorline', false)
+  local options = diff_options()
+  vim.api.nvim_win_set_option(win, 'number', options.number)
+  vim.api.nvim_win_set_option(win, 'relativenumber', options.relativenumber)
+  vim.api.nvim_win_set_option(win, 'signcolumn', options.signcolumn)
+  vim.api.nvim_win_set_option(win, 'cursorline', options.cursorline)
+  vim.api.nvim_win_set_option(win, 'foldenable', options.foldenable)
 end
 
 --- Set the filetype of a buffer based on the file extension for syntax highlighting.

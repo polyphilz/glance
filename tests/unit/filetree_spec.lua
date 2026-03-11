@@ -62,6 +62,28 @@ return {
       end,
     },
     {
+      name = 'render uses configured status glyphs',
+      run = function()
+        local config = require('glance.config')
+        config.setup({
+          signs = {
+            added = '+',
+          },
+        })
+
+        local filetree = setup_filetree()
+        filetree.render({
+          staged = {},
+          changes = {
+            { path = 'added.txt', status = 'A', section = 'changes' },
+          },
+          untracked = {},
+        })
+
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[2], '    + added.txt')
+      end,
+    },
+    {
       name = 'render handles empty state',
       run = function()
         local filetree = setup_filetree()

@@ -1,5 +1,5 @@
-local source = debug.getinfo(1, 'S').source:sub(2)
-local helpers_dir = vim.fs.dirname(vim.fs.normalize(source))
+local source = vim.fs.normalize(vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':p'))
+local helpers_dir = vim.fs.dirname(source)
 local tests_dir = vim.fs.dirname(helpers_dir)
 
 return {
