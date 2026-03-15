@@ -24,6 +24,11 @@ local function empty_files()
 end
 
 local function run_git(args)
+  local ok, output = M.run_git_capture(args)
+  return ok, output
+end
+
+function M.run_git_capture(args, opts)
   local root = M.repo_root()
   if not root then
     return false, 'not a git repository'
@@ -32,7 +37,9 @@ local function run_git(args)
   local cmd = { 'git', '-C', root }
   vim.list_extend(cmd, args)
   local output = vim.fn.system(cmd)
-  if vim.v.shell_error ~= 0 then
+  local exit_code = vim.v.shell_error
+  local allowed_codes = (opts and opts.allowed_codes) or { 0 }
+  if not vim.tbl_contains(allowed_codes, exit_code) then
     local message = vim.trim(output)
     if message == '' then
       message = 'git command failed'
@@ -107,6 +114,7 @@ local function build_file_entry(entry, section)
     status = classification.status,
     display_status = classification.display_status,
     kind = classification.kind,
+    is_binary = false,
     x = entry.x,
     y = entry.y,
     raw_status = entry.raw_status,
@@ -235,17 +243,23 @@ function M.parse_porcelain_status(output)
 end
 
 function M.get_changed_files()
-  local root = M.repo_root()
-  if not root then
+  if not M.repo_root() then
     return empty_files()
   end
 
-  local output = vim.fn.system('git status --porcelain=v1 --untracked-files=all 2>/dev/null')
-  if vim.v.shell_error ~= 0 then
+  local ok, output = run_git({ 'status', '--porcelain=v1', '--untracked-files=all' })
+  if not ok then
     return empty_files()
   end
 
-  return M.build_file_sections(M.parse_porcelain_entries(output))
+  local files = M.build_file_sections(M.parse_porcelain_entries(output))
+  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
+    for _, file in ipairs(files[section]) do
+      file.is_binary = M.entry_is_binary(file)
+    end
+  end
+
+  return files
 end
 
 --- Retrieve file content at a specific git ref.
@@ -300,15 +314,76 @@ function M.get_file_content(filepath, ref)
   return lines
 end
 
---- Check if a file is binary according to git.
---- @param filepath string  Path relative to repo root
+local function diff_paths(file)
+  local paths = {}
+
+  if type(file.old_path) == 'string' and file.old_path ~= '' then
+    table.insert(paths, file.old_path)
+  end
+  if type(file.path) == 'string' and file.path ~= '' then
+    table.insert(paths, file.path)
+  end
+
+  return paths
+end
+
+local function entry_binary_args(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return nil
+  end
+
+  if file.section == 'staged' then
+    local args = { 'diff', '--cached', '--numstat', '--' }
+    vim.list_extend(args, diff_paths(file))
+    return args
+  end
+
+  if file.section == 'changes' or file.section == 'conflicts' then
+    local args = { 'diff', '--numstat', '--' }
+    vim.list_extend(args, diff_paths(file))
+    return args
+  end
+
+  if file.section == 'untracked' or file.kind == 'untracked' then
+    local root = M.repo_root()
+    if not root then
+      return nil
+    end
+    return {
+      'diff',
+      '--no-index',
+      '--numstat',
+      '--',
+      '/dev/null',
+      root .. '/' .. file.path,
+    }
+  end
+
+  return nil
+end
+
+--- Check if a file entry is binary according to the diff Glance would show.
+--- @param file table
 --- @return boolean
-function M.is_binary(filepath)
-  local result = vim.fn.system(
-    'git diff --no-index --numstat /dev/null ' .. vim.fn.shellescape(filepath) .. ' 2>/dev/null'
-  )
-  -- Binary files show "-\t-\t" in numstat output
-  return result:match('^%-\t%-\t') ~= nil
+function M.entry_is_binary(file)
+  local args = entry_binary_args(file)
+  if not args then
+    return false
+  end
+
+  local ok, output = M.run_git_capture(args, { allowed_codes = { 0, 1 } })
+  if not ok then
+    return false
+  end
+
+  -- Binary files show "-\t-\t" in numstat output.
+  for line in output:gmatch('[^\n]+') do
+    if line:match('^%-\t%-\t') then
+      return true
+    end
+  end
+
+  return false
 end
 
 --- Discard all git-visible changes for a single file path.

@@ -32,6 +32,10 @@ local function write_file(path, content, mode)
   file:close()
 end
 
+local function binary_blob(...)
+  return string.char(...)
+end
+
 local function new_fixture(root)
   local fixture = {
     temp_dir = root,
@@ -195,7 +199,22 @@ end
 function scenarios.repo_binary(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
   fixture.files.binary = 'assets/sample.bin'
-  fixture:write(fixture.files.binary, string.char(0, 1, 2, 3, 255), 'wb')
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 3, 255), 'wb')
+end
+
+function scenarios.repo_binary_staged_add(fixture)
+  seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
+  fixture.files.binary = 'assets/staged.bin'
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 3, 255), 'wb')
+  fixture:stage(fixture.files.binary)
+end
+
+function scenarios.repo_binary_modified(fixture)
+  fixture.files.binary = 'assets/tracked.bin'
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 3, 255), 'wb')
+  fixture:stage(fixture.files.binary)
+  fixture:git({ 'commit', '-m', 'Seed binary fixture' })
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 4, 255), 'wb')
 end
 
 --- Create a temp git repo fixture for a named scenario.

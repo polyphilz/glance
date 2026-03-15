@@ -17,6 +17,7 @@ local function file(overrides)
     status = '',
     display_status = '',
     kind = '',
+    is_binary = false,
     x = '',
     y = '',
     raw_status = '',
@@ -364,17 +365,78 @@ return {
       end,
     },
     {
-      name = 'integration handles newline stability and binary detection',
+      name = 'integration handles newline stability and untracked binary detection',
       run = function()
         N.with_repo('repo_binary', function(repo)
           local git = require('glance.git')
+          local changed = git.get_changed_files()
+
           A.same(git.get_file_content(repo.files.tracked, 'HEAD'), {
             'alpha',
             'beta',
             'gamma',
           })
-          A.truthy(git.is_binary(repo:path(repo.files.binary)))
-          A.falsy(git.is_binary(repo:path(repo.files.tracked)))
+          A.same(changed.untracked, {
+            file({
+              path = repo.files.binary,
+              section = 'untracked',
+              status = '?',
+              display_status = '?',
+              kind = 'untracked',
+              is_binary = true,
+              x = '?',
+              y = '?',
+              raw_status = '??',
+            }),
+          })
+          A.truthy(git.entry_is_binary(changed.untracked[1]))
+          A.falsy(git.entry_is_binary({
+            path = repo.files.tracked,
+            section = 'changes',
+            kind = 'modified',
+          }))
+        end)
+      end,
+    },
+    {
+      name = 'integration detects binary staged adds and unstaged binary modifications',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_binary_staged_add', function(repo)
+          local changed = git.get_changed_files()
+
+          A.same(changed.staged, {
+            file({
+              path = repo.files.binary,
+              section = 'staged',
+              status = 'A',
+              display_status = 'A',
+              kind = 'added',
+              is_binary = true,
+              x = 'A',
+              y = ' ',
+              raw_status = 'A ',
+            }),
+          })
+        end)
+
+        N.with_repo('repo_binary_modified', function(repo)
+          local changed = git.get_changed_files()
+
+          A.same(changed.changes, {
+            file({
+              path = repo.files.binary,
+              section = 'changes',
+              status = 'M',
+              display_status = 'M',
+              kind = 'modified',
+              is_binary = true,
+              x = ' ',
+              y = 'M',
+              raw_status = ' M',
+            }),
+          })
         end)
       end,
     },
