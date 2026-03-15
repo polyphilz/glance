@@ -182,6 +182,41 @@ return {
       end,
     },
     {
+      name = 'discard selected file warns for blocked states without prompting',
+      run = function()
+        N.with_repo('repo_type_change', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+          local messages, restore = N.capture_notifications()
+          local original_confirm = vim.fn.confirm
+          local confirm_calls = 0
+
+          vim.fn.confirm = function()
+            confirm_calls = confirm_calls + 1
+            return 1
+          end
+
+          local ok, err = xpcall(function()
+            vim.api.nvim_set_current_win(filetree.win)
+            N.press('d')
+          end, debug.traceback)
+
+          vim.fn.confirm = original_confirm
+          restore()
+
+          if not ok then
+            error(err, 0)
+          end
+
+          A.equal(confirm_calls, 0)
+          A.equal(messages[1].msg, git.UNSUPPORTED_DISCARD_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+          A.contains(repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' }), 'T ' .. repo.files.tracked)
+        end)
+      end,
+    },
+    {
       name = 'discard all honors confirm and resets the repo state',
       run = function()
         N.with_repo('repo_modified', function(repo)
@@ -211,6 +246,41 @@ return {
           A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
           A.falsy(vim.uv.fs_stat(repo:path(repo.files.staged_add)))
           A.falsy(vim.uv.fs_stat(repo:path(repo.files.untracked)))
+        end)
+      end,
+    },
+    {
+      name = 'discard all warns when the repo contains blocked states',
+      run = function()
+        N.with_repo('repo_binary_staged_add', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+          local messages, restore = N.capture_notifications()
+          local original_confirm = vim.fn.confirm
+          local confirm_calls = 0
+
+          vim.fn.confirm = function()
+            confirm_calls = confirm_calls + 1
+            return 1
+          end
+
+          local ok, err = xpcall(function()
+            vim.api.nvim_set_current_win(filetree.win)
+            N.press('D')
+          end, debug.traceback)
+
+          vim.fn.confirm = original_confirm
+          restore()
+
+          if not ok then
+            error(err, 0)
+          end
+
+          A.equal(confirm_calls, 0)
+          A.equal(messages[1].msg, git.UNSUPPORTED_DISCARD_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+          A.contains(repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' }), 'A  ' .. repo.files.binary)
         end)
       end,
     },

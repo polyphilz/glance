@@ -276,6 +276,72 @@ return {
       end,
     },
     {
+      name = 'discard safety allows ordinary states and blocks non-ordinary or binary entries',
+      run = function()
+        local git = require('glance.git')
+        local ok, err, blocked
+
+        ok, err = git.can_discard_file({
+          path = 'tracked.txt',
+          kind = 'modified',
+          status = 'M',
+          section = 'changes',
+        })
+        A.truthy(ok, err)
+        A.equal(err, nil)
+
+        ok, err = git.can_discard_file({
+          path = 'scratch.txt',
+          kind = 'untracked',
+          status = '?',
+          section = 'untracked',
+        })
+        A.truthy(ok, err)
+        A.equal(err, nil)
+
+        ok, err = git.can_discard_file({
+          path = 'conflict.txt',
+          kind = 'conflicted',
+          status = 'U',
+          section = 'conflicts',
+        })
+        A.falsy(ok)
+        A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+
+        ok, err = git.can_discard_file({
+          path = 'typed.txt',
+          status = 'T',
+          section = 'changes',
+        })
+        A.falsy(ok)
+        A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+
+        ok, err = git.can_discard_file({
+          path = 'image.png',
+          kind = 'added',
+          status = 'A',
+          section = 'staged',
+          is_binary = true,
+        })
+        A.falsy(ok)
+        A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+
+        ok, err, blocked = git.can_discard_all(files({
+          staged = {
+            file({
+              path = 'copied.txt',
+              kind = 'copied',
+              status = 'C',
+              section = 'staged',
+            }),
+          },
+        }))
+        A.falsy(ok)
+        A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+        A.equal(blocked.path, 'copied.txt')
+      end,
+    },
+    {
       name = 'integration reads repo state and file content',
       run = function()
         N.with_repo('repo_mixed_mm', function(repo)
@@ -441,6 +507,32 @@ return {
       end,
     },
     {
+      name = 'integration discard_file rejects blocked git states without mutating the repo',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_type_change', function(repo)
+          local changed = git.get_changed_files()
+          local ok, err = git.discard_file(changed.changes[1])
+          local status = repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })
+
+          A.falsy(ok)
+          A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+          A.contains(status, 'T tracked.txt')
+        end)
+
+        N.with_repo('repo_binary_staged_add', function(repo)
+          local changed = git.get_changed_files()
+          local ok, err = git.discard_file(changed.staged[1])
+          local status = repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })
+
+          A.falsy(ok)
+          A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+          A.contains(status, 'A  ' .. repo.files.binary)
+        end)
+      end,
+    },
+    {
       name = 'integration discard_file restores a path back to HEAD',
       run = function()
         N.with_repo('repo_mixed_mm', function(repo)
@@ -474,6 +566,20 @@ return {
           A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
           A.falsy(vim.uv.fs_stat(repo:path(repo.files.staged_add)))
           A.falsy(vim.uv.fs_stat(repo:path(repo.files.untracked)))
+        end)
+      end,
+    },
+    {
+      name = 'integration discard_all rejects repositories with blocked git states',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local ok, err = git.discard_all()
+          local status = repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })
+
+          A.falsy(ok)
+          A.equal(err, git.UNSUPPORTED_DISCARD_MESSAGE)
+          A.contains(status, 'UU ' .. repo.files.tracked)
         end)
       end,
     },

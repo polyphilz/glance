@@ -399,6 +399,29 @@ local function confirm_action(message, accept_label)
   return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
 end
 
+local function notify_discard_file_error(file, err)
+  local git = require('glance.git')
+  if err == git.UNSUPPORTED_DISCARD_MESSAGE then
+    vim.notify(err, vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify(
+    'glance: failed to discard ' .. display_path(file) .. ': ' .. tostring(err),
+    vim.log.levels.ERROR
+  )
+end
+
+local function notify_discard_all_error(err)
+  local git = require('glance.git')
+  if err == git.UNSUPPORTED_DISCARD_MESSAGE then
+    vim.notify(err, vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify('glance: failed to discard all changes: ' .. tostring(err), vim.log.levels.ERROR)
+end
+
 local function refresh_after_discard(active_file)
   local ui = require('glance.ui')
   M.refresh()
@@ -410,6 +433,13 @@ end
 function M.discard_selected_file()
   local file = M.get_selected_file()
   if not file then
+    return
+  end
+
+  local git = require('glance.git')
+  local allowed, err = git.can_discard_file(file)
+  if not allowed then
+    notify_discard_file_error(file, err)
     return
   end
 
@@ -425,12 +455,10 @@ function M.discard_selected_file()
     active_file = nil
   end
 
-  local ok, err = require('glance.git').discard_file(file)
+  local ok
+  ok, err = git.discard_file(file)
   if not ok then
-    vim.notify(
-      'glance: failed to discard ' .. display_path(file) .. ': ' .. tostring(err),
-      vim.log.levels.ERROR
-    )
+    notify_discard_file_error(file, err)
     return
   end
 
@@ -438,6 +466,13 @@ function M.discard_selected_file()
 end
 
 function M.discard_all()
+  local git = require('glance.git')
+  local allowed, err = git.can_discard_all(M.files)
+  if not allowed then
+    notify_discard_all_error(err)
+    return
+  end
+
   if not confirm_action(
     'Discard all changes in this repository? This will also remove untracked files.',
     'Discard All'
@@ -450,9 +485,10 @@ function M.discard_all()
     require('glance.diffview').close(true)
   end
 
-  local ok, err = require('glance.git').discard_all()
+  local ok
+  ok, err = git.discard_all()
   if not ok then
-    vim.notify('glance: failed to discard all changes: ' .. tostring(err), vim.log.levels.ERROR)
+    notify_discard_all_error(err)
     return
   end
 

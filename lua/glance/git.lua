@@ -19,6 +19,14 @@ local CONFLICT_STATUS_PAIRS = {
   UU = true,
 }
 
+local DISCARDABLE_KINDS = {
+  modified = true,
+  added = true,
+  deleted = true,
+  renamed = true,
+  untracked = true,
+}
+
 local function empty_files()
   return { staged = {}, changes = {}, untracked = {}, conflicts = {} }
 end
@@ -386,13 +394,94 @@ function M.entry_is_binary(file)
   return false
 end
 
+M.UNSUPPORTED_DISCARD_MESSAGE = 'glance: discard is not supported for this git state yet'
+
+local function infer_file_kind(file)
+  if type(file) ~= 'table' then
+    return 'unsupported'
+  end
+
+  if type(file.kind) == 'string' and file.kind ~= '' then
+    return file.kind
+  end
+
+  if file.section == 'conflicts' or file.status == 'U' then
+    return 'conflicted'
+  end
+  if file.status == '?' then
+    return 'untracked'
+  end
+  if file.status == 'D' then
+    return 'deleted'
+  end
+  if file.status == 'R' then
+    return 'renamed'
+  end
+  if file.status == 'C' then
+    return 'copied'
+  end
+  if file.status == 'T' then
+    return 'type_changed'
+  end
+  if file.status == 'A' then
+    return 'added'
+  end
+  if file.status == 'M' then
+    return 'modified'
+  end
+
+  return 'unsupported'
+end
+
+--- Check whether a single file entry is safe to discard with current release semantics.
+--- @param file table|nil
+--- @return boolean, string|nil
+function M.can_discard_file(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return false, 'invalid file target'
+  end
+
+  if file.is_binary then
+    return false, M.UNSUPPORTED_DISCARD_MESSAGE
+  end
+
+  local kind = infer_file_kind(file)
+  if not DISCARDABLE_KINDS[kind] then
+    return false, M.UNSUPPORTED_DISCARD_MESSAGE
+  end
+
+  return true
+end
+
+--- Check whether the current repo state is safe for discard-all.
+--- @param files table|nil
+--- @return boolean, string|nil, table|nil
+function M.can_discard_all(files)
+  files = files or M.get_changed_files()
+  if type(files) ~= 'table' then
+    return false, 'invalid files table'
+  end
+
+  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
+    for _, file in ipairs(files[section] or {}) do
+      local ok, err = M.can_discard_file(file)
+      if not ok then
+        return false, err, file
+      end
+    end
+  end
+
+  return true
+end
+
 --- Discard all git-visible changes for a single file path.
 --- This restores tracked files to HEAD and removes new files not present in HEAD.
 --- @param file { path: string, old_path: string|nil }|nil
 --- @return boolean, string|nil
 function M.discard_file(file)
-  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
-    return false, 'invalid file target'
+  local allowed, reason = M.can_discard_file(file)
+  if not allowed then
+    return false, reason
   end
 
   if file.old_path and path_exists_at_head(file.old_path) then
@@ -417,6 +506,11 @@ end
 --- Discard all tracked, staged, and untracked changes in the repository.
 --- @return boolean, string|nil
 function M.discard_all()
+  local allowed, reason = M.can_discard_all()
+  if not allowed then
+    return false, reason
+  end
+
   local ok, err = run_git({ 'reset', '--hard', 'HEAD' })
   if not ok then
     return false, err
