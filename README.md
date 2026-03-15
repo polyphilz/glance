@@ -2,6 +2,25 @@
 
 Glance is a standalone app built on Neovim for reviewing git changes. It owns the Neovim session it starts.
 
+## Dependencies
+
+Required to run Glance:
+
+- macOS or Linux. The launcher and installer currently assume a Unix-like shell environment.
+- Neovim on your `PATH` as `nvim`. `0.11+` is the safe target for the current codebase.
+- Git on your `PATH` as `git`.
+- Bash plus standard Unix utilities used by the launcher/install flow: `readlink`, `ln`, and `mkdir`.
+
+Install notes:
+
+- `./install.sh` creates a symlink at `~/.local/bin/glance`.
+- `~/.local/bin` needs to be on your `PATH`.
+- The install is symlink-based, so the cloned repo needs to stay in a stable location after installation.
+
+Optional:
+
+- `nvim-treesitter` in Neovim's standard data/runtime path if you want richer syntax highlighting while Glance runs in `--clean` mode.
+
 ## Config
 
 Glance loads an optional Lua config file automatically on startup. Search order:

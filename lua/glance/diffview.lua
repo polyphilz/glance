@@ -220,6 +220,20 @@ function M.open_untracked(file)
   M.bind_buffer_keymaps()
 end
 
+local function reload_new_buffer()
+  if not M.new_buf or not vim.api.nvim_buf_is_valid(M.new_buf) then
+    return
+  end
+  if vim.api.nvim_get_option_value('modified', { buf = M.new_buf }) then
+    return
+  end
+
+  vim.api.nvim_buf_call(M.new_buf, function()
+    vim.cmd('silent! edit!')
+  end)
+  vim.cmd('silent! diffupdate')
+end
+
 --- Watch a file on disk for external changes and reload the buffer instantly.
 function M.watch_file(path)
   M.stop_watching()
@@ -229,12 +243,7 @@ function M.watch_file(path)
   w:start(path, watch_options().interval_ms, function(err)
     if err then return end
     vim.schedule(function()
-      if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
-        vim.api.nvim_buf_call(M.new_buf, function()
-          vim.cmd('silent! edit!')
-        end)
-        vim.cmd('silent! diffupdate')
-      end
+      reload_new_buffer()
     end)
   end)
 end

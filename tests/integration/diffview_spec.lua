@@ -256,6 +256,15 @@ return {
             local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
             return lines[1] == 'external change'
           end)
+
+          vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, { 'local unsaved change' })
+          repo:write(repo.files.tracked, 'external change while dirty\n')
+          vim.wait(400)
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'local unsaved change',
+          })
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = diffview.new_buf }), true)
         end)
       end,
     },
