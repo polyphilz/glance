@@ -29,6 +29,32 @@ local function watch_options()
   return config.options.watch
 end
 
+local function resize_filetree()
+  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
+  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
+end
+
+local function open_single_pane()
+  vim.api.nvim_set_current_win(filetree.win)
+  vim.cmd('rightbelow vnew')
+  M.new_win = vim.api.nvim_get_current_win()
+  M.set_win_options(M.new_win)
+end
+
+local function placeholder_message(file, override)
+  if override and override ~= '' then
+    return override
+  end
+
+  local messages = {
+    copied = 'copied entries are not supported yet',
+    type_changed = 'type-changed entries are not supported yet',
+    unsupported = 'this git state is not supported yet',
+  }
+
+  return messages[file.kind] or 'this git state is not supported yet'
+end
+
 --- Open a standard 2-pane side-by-side diff for a modified file.
 function M.open(file)
   local root = git.repo_root()
@@ -51,8 +77,7 @@ function M.open(file)
   local old_lines = git.get_file_content(old_content_path, old_ref)
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
+  resize_filetree()
 
   -- Create the old (left) pane: vertical split to the right of file tree
   vim.api.nvim_set_current_win(filetree.win)
@@ -166,15 +191,11 @@ function M.open_deleted(file)
   local lines = git.get_file_content(file.path, old_ref)
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
+  resize_filetree()
 
   -- Create a single pane
-  vim.api.nvim_set_current_win(filetree.win)
-  vim.cmd('rightbelow vnew')
-  M.new_win = vim.api.nvim_get_current_win()
+  open_single_pane()
   M.new_buf = vim.api.nvim_get_current_buf()
-  M.set_win_options(M.new_win)
 
   local buf_name = 'glance://deleted/' .. file.path
   pcall(vim.api.nvim_buf_set_name, M.new_buf, buf_name)
@@ -202,18 +223,72 @@ function M.open_untracked(file)
   if not root then return end
 
   -- Resize file tree
-  vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
-  vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
+  resize_filetree()
 
   -- Create a single pane and open the file
-  vim.api.nvim_set_current_win(filetree.win)
-  vim.cmd('rightbelow vnew')
-  M.new_win = vim.api.nvim_get_current_win()
-  M.set_win_options(M.new_win)
+  open_single_pane()
 
   local full_path = root .. '/' .. file.path
   vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
   M.new_buf = vim.api.nvim_get_current_buf()
+
+  M.equalize_panes()
+  M.setup_autocmds(file)
+  M.bind_buffer_keymaps()
+end
+
+--- Open a single editable pane for a conflicted working-tree file.
+function M.open_conflict(file)
+  local root = git.repo_root()
+  if not root then return end
+
+  resize_filetree()
+  open_single_pane()
+
+  local full_path = root .. '/' .. file.path
+  vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
+  M.new_buf = vim.api.nvim_get_current_buf()
+
+  if watch_options().enabled then
+    M.watch_file(full_path)
+  end
+
+  M.equalize_panes()
+  M.setup_autocmds(file)
+  M.bind_buffer_keymaps()
+end
+
+--- Open a single read-only placeholder pane for visible-but-unsupported states.
+--- @param file table
+--- @param message string|nil
+function M.open_placeholder(file, message)
+  resize_filetree()
+  open_single_pane()
+  M.new_buf = vim.api.nvim_get_current_buf()
+
+  local buf_name = 'glance://placeholder/' .. (file.kind or 'unknown') .. '/' .. file.path
+  local lines = {
+    'Glance',
+    '',
+    'Path: ' .. file.path,
+    'Section: ' .. (file.section or 'unknown'),
+    'Raw status: ' .. (file.raw_status or file.status or 'unknown'),
+    'Kind: ' .. (file.kind or 'unknown'),
+  }
+
+  if file.old_path then
+    table.insert(lines, 'Old path: ' .. file.old_path)
+  end
+
+  table.insert(lines, '')
+  table.insert(lines, placeholder_message(file, message))
+
+  pcall(vim.api.nvim_buf_set_name, M.new_buf, buf_name)
+  vim.api.nvim_buf_set_lines(M.new_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(M.new_buf, 'buftype', 'nofile')
+  vim.api.nvim_buf_set_option(M.new_buf, 'modifiable', false)
+  vim.api.nvim_buf_set_option(M.new_buf, 'readonly', true)
+  vim.api.nvim_buf_set_option(M.new_buf, 'swapfile', false)
 
   M.equalize_panes()
   M.setup_autocmds(file)

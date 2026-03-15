@@ -58,6 +58,8 @@ return {
             open = diffview.open,
             open_deleted = diffview.open_deleted,
             open_untracked = diffview.open_untracked,
+            open_conflict = diffview.open_conflict,
+            open_placeholder = diffview.open_placeholder,
             close = diffview.close,
           }
 
@@ -69,6 +71,12 @@ return {
           end
           diffview.open_untracked = function(file)
             calls[#calls + 1] = 'untracked:' .. file.path
+          end
+          diffview.open_conflict = function(file)
+            calls[#calls + 1] = 'conflict:' .. file.path
+          end
+          diffview.open_placeholder = function(file, message)
+            calls[#calls + 1] = 'placeholder:' .. (file.kind or 'unknown') .. ':' .. file.path .. ':' .. tostring(message)
           end
           diffview.close = function()
           end
@@ -83,10 +91,27 @@ return {
           ui.diff_open = false
           ui.show_welcome()
           ui.open_file({ path = 'worktree-add.txt', status = 'A', section = 'changes' })
+          ui.diff_open = false
+          ui.show_welcome()
+          ui.open_file({ path = 'conflict.txt', status = 'U', section = 'conflicts', kind = 'conflicted' })
+          ui.diff_open = false
+          ui.show_welcome()
+          ui.open_file({ path = 'typed.txt', status = 'T', section = 'changes', kind = 'type_changed' })
+          ui.diff_open = false
+          ui.show_welcome()
+          ui.open_file({ path = 'copied.txt', status = 'C', section = 'staged', kind = 'copied' })
+          ui.diff_open = false
+          ui.show_welcome()
+          ui.open_file({ path = 'mystery.txt', status = 'X', section = 'changes', kind = 'unsupported' })
+          ui.diff_open = false
+          ui.show_welcome()
+          ui.open_file({ path = 'binary.bin', status = 'M', section = 'changes', kind = 'modified', is_binary = true })
 
           diffview.open = original.open
           diffview.open_deleted = original.open_deleted
           diffview.open_untracked = original.open_untracked
+          diffview.open_conflict = original.open_conflict
+          diffview.open_placeholder = original.open_placeholder
           diffview.close = original.close
 
           A.same(calls, {
@@ -94,6 +119,11 @@ return {
             'untracked:scratch.txt',
             'open:staged-add.txt',
             'untracked:worktree-add.txt',
+            'conflict:conflict.txt',
+            'placeholder:type_changed:typed.txt:nil',
+            'placeholder:copied:copied.txt:nil',
+            'placeholder:unsupported:mystery.txt:nil',
+            'placeholder:modified:binary.bin:binary diff not supported yet',
           })
           A.equal(ui.welcome_win, nil)
         end)

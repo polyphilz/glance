@@ -355,9 +355,51 @@ function M.setup_layout()
   })
 end
 
---- Open a file based on its type (modified, deleted, untracked/added).
+local function infer_kind(file)
+  if type(file) ~= 'table' then
+    return 'unsupported'
+  end
+
+  if file.kind then
+    return file.kind
+  end
+
+  if file.is_binary then
+    return 'binary'
+  end
+
+  if file.section == 'conflicts' or file.status == 'U' then
+    return 'conflicted'
+  end
+  if file.status == '?' then
+    return 'untracked'
+  end
+  if file.status == 'D' then
+    return 'deleted'
+  end
+  if file.status == 'R' then
+    return 'renamed'
+  end
+  if file.status == 'C' then
+    return 'copied'
+  end
+  if file.status == 'T' then
+    return 'type_changed'
+  end
+  if file.status == 'A' then
+    return 'added'
+  end
+  if file.status == 'M' then
+    return 'modified'
+  end
+
+  return 'unsupported'
+end
+
+--- Open a file based on its classified git state.
 function M.open_file(file)
   local diffview = require('glance.diffview')
+  local kind = infer_kind(file)
 
   -- Close any existing diff first
   if M.diff_open then
@@ -367,14 +409,18 @@ function M.open_file(file)
   -- Close welcome pane to make room for diff
   M.close_welcome()
 
-  if file.status == 'D' then
+  if file.is_binary then
+    diffview.open_placeholder(file, 'binary diff not supported yet')
+  elseif kind == 'deleted' then
     diffview.open_deleted(file)
-  elseif file.status == '?' then
+  elseif kind == 'untracked' then
     diffview.open_untracked(file)
-  elseif file.status == 'A' and file.section == 'staged' then
-    diffview.open(file)
-  elseif file.status == 'A' and file.section ~= 'staged' then
+  elseif kind == 'added' and file.section ~= 'staged' then
     diffview.open_untracked(file)
+  elseif kind == 'conflicted' then
+    diffview.open_conflict(file)
+  elseif kind == 'copied' or kind == 'type_changed' or kind == 'unsupported' then
+    diffview.open_placeholder(file)
   else
     diffview.open(file)
   end

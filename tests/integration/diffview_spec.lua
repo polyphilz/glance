@@ -76,6 +76,58 @@ return {
       end,
     },
     {
+      name = 'conflicted files open a single editable pane with conflict markers',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          A.equal(diffview.old_win, nil)
+          A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), '')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), false)
+          A.equal(vim.api.nvim_get_option_value('diff', { win = diffview.new_win }), false)
+          A.equal(minimap.win, nil)
+
+          local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
+          A.contains(text, '<<<<<<<')
+          A.contains(text, '=======')
+          A.contains(text, '>>>>>>>')
+        end)
+      end,
+    },
+    {
+      name = 'type-changed files open a placeholder instead of a diff',
+      run = function()
+        N.with_repo('repo_type_change', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+
+          ui.open_file(filetree.files.changes[1])
+
+          A.equal(diffview.old_win, nil)
+          A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), 'nofile')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), true)
+          A.equal(vim.api.nvim_get_option_value('diff', { win = diffview.new_win }), false)
+          A.equal(minimap.win, nil)
+
+          local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
+          A.contains(text, 'Kind: type_changed')
+          A.contains(text, 'Raw status:  T')
+          A.contains(text, 'type-changed entries are not supported yet')
+        end)
+      end,
+    },
+    {
       name = 'staged rename uses old path content in the left pane',
       run = function()
         N.with_repo('repo_rename', function()
