@@ -119,6 +119,9 @@ local ALLOWED_SIGNS = {
   added = true,
   deleted = true,
   renamed = true,
+  copied = true,
+  type_changed = true,
+  conflicted = true,
   untracked = true,
 }
 
@@ -194,6 +197,9 @@ local BASE_DEFAULTS = {
     added = 'A',
     deleted = 'D',
     renamed = 'R',
+    copied = 'C',
+    type_changed = 'T',
+    conflicted = 'U',
     untracked = '?',
   },
   welcome = {

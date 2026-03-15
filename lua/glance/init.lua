@@ -71,7 +71,7 @@ function M.start()
   local files = git.get_changed_files()
 
   -- Check for empty state
-  local total = #files.staged + #files.changes + #files.untracked
+  local total = #files.conflicts + #files.staged + #files.changes + #files.untracked
   if total == 0 then
     vim.notify('glance: no changes found', vim.log.levels.INFO)
     vim.cmd('qa!')
@@ -179,6 +179,9 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceStatusA', { fg = func })
   vim.api.nvim_set_hl(0, 'GlanceStatusD', { fg = keyword })
   vim.api.nvim_set_hl(0, 'GlanceStatusR', { fg = type_color })
+  vim.api.nvim_set_hl(0, 'GlanceStatusC', { fg = type_color })
+  vim.api.nvim_set_hl(0, 'GlanceStatusT', { fg = palette.changed })
+  vim.api.nvim_set_hl(0, 'GlanceStatusConflict', { fg = keyword })
   vim.api.nvim_set_hl(0, 'GlanceStatusU', { fg = palette.untracked })
   vim.api.nvim_set_hl(0, 'GlanceActiveFile', { bg = selection })
   vim.api.nvim_set_hl(0, 'GlanceLegendTitle', { fg = comment, bg = bg, bold = true })

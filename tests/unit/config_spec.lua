@@ -91,6 +91,9 @@ return {
             added = 'A',
             deleted = 'D',
             renamed = 'R',
+            copied = 'C',
+            type_changed = 'T',
+            conflicted = 'U',
             untracked = '?',
           },
           welcome = {
@@ -196,6 +199,8 @@ return {
 
         A.equal(config.options.signs.added, '+')
         A.equal(config.options.signs.modified, 'M')
+        A.equal(config.options.signs.copied, 'C')
+        A.equal(config.options.signs.conflicted, 'U')
         A.equal(config.options.signs.untracked, '?')
       end,
     },

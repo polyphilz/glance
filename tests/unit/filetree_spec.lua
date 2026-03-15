@@ -45,6 +45,32 @@ return {
       end,
     },
     {
+      name = 'render outputs conflicts as a dedicated section',
+      run = function()
+        local filetree = setup_filetree()
+        filetree.render({
+          conflicts = {
+            { path = 'conflict.txt', status = 'U', section = 'conflicts' },
+          },
+          changes = {
+            { path = 'typed.txt', status = 'T', section = 'changes' },
+          },
+        })
+
+        A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  discard',
+          '  [d] file   [D] all',
+          '',
+          '  Conflicts',
+          '    U conflict.txt',
+          '',
+          '  Changes',
+          '    T typed.txt',
+        })
+        A.equal(filetree.selected_line, 5)
+      end,
+    },
+    {
       name = 'render uses old path arrow for renames',
       run = function()
         local filetree = setup_filetree()
@@ -70,20 +96,23 @@ return {
         local config = require('glance.config')
         config.setup({
           signs = {
-            added = '+',
+            copied = '>',
+            conflicted = '!',
           },
         })
 
         local filetree = setup_filetree()
         filetree.render({
-          staged = {},
-          changes = {
-            { path = 'added.txt', status = 'A', section = 'changes' },
+          conflicts = {
+            { path = 'conflict.txt', status = 'U', section = 'conflicts' },
           },
-          untracked = {},
+          staged = {
+            { path = 'copied.txt', status = 'C', section = 'staged' },
+          },
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    + added.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    ! conflict.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    > copied.txt')
       end,
     },
     {
@@ -113,6 +142,9 @@ return {
         A.equal(filetree.status_highlight('A'), 'GlanceStatusA')
         A.equal(filetree.status_highlight('D'), 'GlanceStatusD')
         A.equal(filetree.status_highlight('R'), 'GlanceStatusR')
+        A.equal(filetree.status_highlight('C'), 'GlanceStatusC')
+        A.equal(filetree.status_highlight('T'), 'GlanceStatusT')
+        A.equal(filetree.status_highlight('U'), 'GlanceStatusConflict')
         A.equal(filetree.status_highlight('?'), 'GlanceStatusU')
         A.equal(filetree.status_highlight('X'), nil)
       end,

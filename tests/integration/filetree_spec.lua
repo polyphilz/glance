@@ -91,6 +91,21 @@ return {
       end,
     },
     {
+      name = 'type-changed entries render in the changes section',
+      run = function()
+        N.with_repo('repo_type_change', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
+
+          A.contains(lines, '  Changes')
+          A.contains(lines, '    T ' .. repo.files.tracked)
+          A.equal(filetree.get_selected_file().path, repo.files.tracked)
+          A.equal(filetree.get_selected_file().section, 'changes')
+        end)
+      end,
+    },
+    {
       name = 'highlight active adds and clears the active extmark',
       run = function()
         N.with_repo('repo_modified', function(repo)

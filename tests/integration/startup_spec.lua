@@ -81,6 +81,26 @@ return {
       end,
     },
     {
+      name = 'conflicts count as startup-visible changes and render a conflicts section',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local messages, restore = N.capture_notifications()
+          require('glance').start()
+          restore()
+
+          local filetree = require('glance.filetree')
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
+
+          A.same(messages, {})
+          A.truthy(filetree.win and vim.api.nvim_win_is_valid(filetree.win))
+          A.contains(lines, '  Conflicts')
+          A.contains(lines, '    U ' .. repo.files.tracked)
+          A.equal(filetree.get_selected_file().path, repo.files.tracked)
+          A.equal(filetree.get_selected_file().section, 'conflicts')
+        end)
+      end,
+    },
+    {
       name = 'startup can hide the statusline when configured',
       run = function()
         N.with_repo('repo_modified', function()

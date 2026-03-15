@@ -32,6 +32,9 @@ local function status_text(status)
     A = signs.added,
     D = signs.deleted,
     R = signs.renamed,
+    C = signs.copied,
+    T = signs.type_changed,
+    U = signs.conflicted,
     ['?'] = signs.untracked,
   }
   return map[status] or status
@@ -111,6 +114,14 @@ end
 
 --- Render the file list with section headers into the buffer.
 function M.render(files)
+  files = files or {}
+  files = {
+    conflicts = files.conflicts or {},
+    staged = files.staged or {},
+    changes = files.changes or {},
+    untracked = files.untracked or {},
+  }
+
   M.files = files
   M.line_map = {}
 
@@ -149,6 +160,7 @@ function M.render(files)
     end
   end
 
+  add_section('Conflicts', files.conflicts)
   add_section('Staged Changes', files.staged)
   add_section('Changes', files.changes)
   add_section('Untracked', files.untracked)
@@ -181,6 +193,9 @@ function M.status_highlight(status)
     A = 'GlanceStatusA',
     D = 'GlanceStatusD',
     R = 'GlanceStatusR',
+    C = 'GlanceStatusC',
+    T = 'GlanceStatusT',
+    U = 'GlanceStatusConflict',
     ['?'] = 'GlanceStatusU',
   }
   return map[status]
