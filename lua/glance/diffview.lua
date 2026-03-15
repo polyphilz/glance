@@ -220,21 +220,20 @@ function M.open_untracked(file)
   M.bind_buffer_keymaps()
 end
 
-local function reload_new_buffer()
+local function check_new_buffer()
   if not M.new_buf or not vim.api.nvim_buf_is_valid(M.new_buf) then
     return
   end
-  if vim.api.nvim_get_option_value('modified', { buf = M.new_buf }) then
+  if not M.new_win or not vim.api.nvim_win_is_valid(M.new_win) then
     return
   end
 
-  vim.api.nvim_buf_call(M.new_buf, function()
-    vim.cmd('silent! edit!')
+  vim.api.nvim_win_call(M.new_win, function()
+    vim.cmd('silent! checktime')
   end)
-  vim.cmd('silent! diffupdate')
 end
 
---- Watch a file on disk for external changes and reload the buffer instantly.
+--- Watch a file on disk and trigger Neovim's native file-change handling immediately.
 function M.watch_file(path)
   M.stop_watching()
   local w = vim.uv.new_fs_poll()
@@ -243,7 +242,7 @@ function M.watch_file(path)
   w:start(path, watch_options().interval_ms, function(err)
     if err then return end
     vim.schedule(function()
-      reload_new_buffer()
+      check_new_buffer()
     end)
   end)
 end
@@ -355,6 +354,16 @@ function M.setup_autocmds(file)
 
   -- When the new buffer is saved, refresh the diff
   if M.new_buf and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == '' then
+    vim.api.nvim_create_autocmd('FileChangedShellPost', {
+      group = M.autocmd_group,
+      buffer = M.new_buf,
+      callback = function()
+        vim.schedule(function()
+          M.refresh(file)
+        end)
+      end,
+    })
+
     vim.api.nvim_create_autocmd('BufWritePost', {
       group = M.autocmd_group,
       buffer = M.new_buf,
