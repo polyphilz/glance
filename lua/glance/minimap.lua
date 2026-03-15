@@ -11,6 +11,7 @@ local config = require('glance.config')
 local logic = require('glance.minimap_logic')
 
 local ns = vim.api.nvim_create_namespace('glance_minimap')
+local CONTENT_DEBOUNCE_MS = 120
 
 -- State
 M.buf = nil
@@ -22,6 +23,13 @@ M.pixel_count = 0
 M.total_logical = 0
 M.augroup = vim.api.nvim_create_augroup('GlanceMinimap', { clear = true })
 M.debounce_timer = nil
+M.content_timer = nil
+M.content_dirty = false
+M.full_update_pending = false
+M.full_update_running = false
+M.last_changedtick = nil
+M.last_new_line_count = 0
+M.last_pixel_count = 0
 
 -- Diff state constants
 local NONE = logic.states.NONE
@@ -35,6 +43,10 @@ local hl_cache = {}
 
 local function minimap_config()
   return config.options.minimap
+end
+
+local function content_debounce_ms()
+  return math.max(minimap_config().debounce_ms, CONTENT_DEBOUNCE_MS)
 end
 
 local function colors()
@@ -59,6 +71,14 @@ local function close_debounce_timer()
     M.debounce_timer:stop()
     M.debounce_timer:close()
     M.debounce_timer = nil
+  end
+end
+
+local function close_content_timer()
+  if M.content_timer then
+    M.content_timer:stop()
+    M.content_timer:close()
+    M.content_timer = nil
   end
 end
 
@@ -102,6 +122,49 @@ local function get_cursor_pixel(total_lines, pixel_count)
   return logic.cursor_pixel(cursor_line, total_lines, pixel_count)
 end
 
+local function has_valid_state()
+  return M.buf and vim.api.nvim_buf_is_valid(M.buf)
+    and M.win and vim.api.nvim_win_is_valid(M.win)
+    and M.target_win and vim.api.nvim_win_is_valid(M.target_win)
+    and M.old_lines ~= nil
+end
+
+local function target_buf()
+  if not M.target_win or not vim.api.nvim_win_is_valid(M.target_win) then
+    return nil
+  end
+
+  local buf = vim.api.nvim_win_get_buf(M.target_win)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return nil
+  end
+
+  return buf
+end
+
+local function sync_float_geometry()
+  if not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return nil
+  end
+  if not M.target_win or not vim.api.nvim_win_is_valid(M.target_win) then
+    return nil
+  end
+
+  local wh = vim.api.nvim_win_get_height(M.target_win)
+  local ww = vim.api.nvim_win_get_width(M.target_win)
+  pcall(vim.api.nvim_win_set_config, M.win, {
+    relative = 'win',
+    win = M.target_win,
+    anchor = 'NE',
+    row = 0,
+    col = ww,
+    width = minimap_config().width,
+    height = wh,
+  })
+
+  return wh
+end
+
 --- Render the minimap buffer using half-block characters.
 local function render(pixels, pixel_count, vp_start_px, vp_end_px, cursor_px)
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then return end
@@ -142,25 +205,16 @@ local function render(pixels, pixel_count, vp_start_px, vp_end_px, cursor_px)
   end
 end
 
---- Viewport-only update: re-render with current scroll position but cached pixels.
-function M.update_viewport()
-  if not M.cached_pixels or not M.win or not vim.api.nvim_win_is_valid(M.win) then return end
-  if not M.target_win or not vim.api.nvim_win_is_valid(M.target_win) then return end
+local function render_from_cache()
+  if not M.cached_pixels or not has_valid_state() then
+    return
+  end
 
-  -- Reposition float in case of resize
-  local wh = vim.api.nvim_win_get_height(M.target_win)
-  local ww = vim.api.nvim_win_get_width(M.target_win)
-  pcall(vim.api.nvim_win_set_config, M.win, {
-    relative = 'win',
-    win = M.target_win,
-    anchor = 'NE',
-    row = 0,
-    col = ww,
-    width = minimap_config().width,
-    height = wh,
-  })
+  local wh = sync_float_geometry()
+  if not wh then
+    return
+  end
 
-  -- Recompute pixels if height changed
   local needed = wh * 2
   if needed ~= M.pixel_count then
     M.full_update()
@@ -173,26 +227,123 @@ function M.update_viewport()
   render(M.cached_pixels, M.pixel_count, vps, vpe, cpx)
 end
 
---- Full update: recompute diff hunks, downsample, and render.
-function M.full_update()
-  if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then return end
-  if not M.win or not vim.api.nvim_win_is_valid(M.win) then return end
-  if not M.target_win or not vim.api.nvim_win_is_valid(M.target_win) then return end
-  if not M.old_lines then return end
+local function run_full_update(opts)
+  opts = opts or {}
+  if M.full_update_running then
+    M.full_update_pending = true
+    return
+  end
 
-  local new_buf = vim.api.nvim_win_get_buf(M.target_win)
+  M.full_update_running = true
+  local ok, err = xpcall(function()
+    M.full_update(opts)
+  end, debug.traceback)
+  M.full_update_running = false
+
+  local rerun = M.full_update_pending
+  M.full_update_pending = false
+  if rerun and has_valid_state() then
+    vim.schedule(function()
+      if has_valid_state() then
+        run_full_update()
+      end
+    end)
+  end
+
+  if not ok then
+    error(err)
+  end
+end
+
+--- Viewport-only update: re-render with current scroll position but cached pixels.
+function M.update_viewport()
+  render_from_cache()
+end
+
+function M.request_viewport_update()
+  close_debounce_timer()
+  M.debounce_timer = vim.uv.new_timer()
+  if not M.debounce_timer then
+    return
+  end
+
+  M.debounce_timer:start(minimap_config().debounce_ms, 0, vim.schedule_wrap(function()
+    M.update_viewport()
+    close_debounce_timer()
+  end))
+end
+
+function M.flush_content_update(opts)
+  opts = opts or {}
+  if not opts.run_even_if_clean and not M.content_dirty then
+    return
+  end
+
+  close_content_timer()
+  run_full_update({ force_recompute = opts.force_recompute })
+end
+
+function M.request_content_update(opts)
+  opts = opts or {}
+  M.content_dirty = true
+
+  if opts.immediate then
+    M.flush_content_update({ run_even_if_clean = true, force_recompute = opts.force_recompute })
+    return
+  end
+
+  close_content_timer()
+  M.content_timer = vim.uv.new_timer()
+  if not M.content_timer then
+    return
+  end
+
+  M.content_timer:start(content_debounce_ms(), 0, vim.schedule_wrap(function()
+    close_content_timer()
+    M.flush_content_update()
+  end))
+end
+
+--- Full update: recompute diff hunks, downsample, and render.
+function M.full_update(opts)
+  opts = opts or {}
+  if not has_valid_state() then
+    return
+  end
+
+  local new_buf = target_buf()
+  if not new_buf then
+    return
+  end
+
   local wh = vim.api.nvim_win_get_height(M.target_win)
-  M.pixel_count = wh * 2
+  local pixel_count = wh * 2
+  local changedtick = vim.api.nvim_buf_get_changedtick(new_buf)
+  local line_count = vim.api.nvim_buf_line_count(new_buf)
+
+  M.pixel_count = pixel_count
+
+  if not opts.force_recompute
+    and M.cached_pixels
+    and M.last_changedtick == changedtick
+    and M.last_pixel_count == pixel_count
+    and M.last_new_line_count == line_count
+  then
+    M.content_dirty = false
+    render_from_cache()
+    return
+  end
 
   local new_lines = vim.api.nvim_buf_get_lines(new_buf, 0, -1, false)
   local line_types, total_lines = logic.compute_line_types(M.old_lines, new_lines)
   M.total_logical = total_lines
-  M.cached_pixels = logic.downsample(line_types, total_lines, M.pixel_count)
+  M.cached_pixels = logic.downsample(line_types, total_lines, pixel_count)
+  M.last_changedtick = changedtick
+  M.last_new_line_count = line_count
+  M.last_pixel_count = pixel_count
+  M.content_dirty = false
 
-  local vp_top, vp_bot = get_viewport()
-  local vps, vpe = logic.viewport_pixels(vp_top, vp_bot, total_lines, M.pixel_count)
-  local cpx = get_cursor_pixel(total_lines, M.pixel_count)
-  render(M.cached_pixels, M.pixel_count, vps, vpe, cpx)
+  render_from_cache()
 end
 
 --- Create the floating window and buffer, then do initial render.
@@ -234,7 +385,7 @@ function M.open(target_win, old_lines)
   vim.api.nvim_win_set_option(M.win, 'winblend', minimap_config().winblend)
 
   -- Initial render
-  M.full_update()
+  M.full_update({ force_recompute = true })
   M.setup_autocmds()
 end
 
@@ -242,41 +393,32 @@ end
 function M.setup_autocmds()
   vim.api.nvim_clear_autocmds({ group = M.augroup })
   close_debounce_timer()
-
-  local function debounced_viewport()
-    close_debounce_timer()
-    M.debounce_timer = vim.uv.new_timer()
-    if not M.debounce_timer then
-      return
-    end
-    M.debounce_timer:start(minimap_config().debounce_ms, 0, vim.schedule_wrap(function()
-      M.update_viewport()
-      close_debounce_timer()
-    end))
-  end
+  close_content_timer()
 
   -- Scroll / cursor move / resize -> cheap viewport update
   vim.api.nvim_create_autocmd({ 'WinScrolled', 'CursorMoved', 'CursorMovedI' }, {
     group = M.augroup,
-    callback = debounced_viewport,
+    callback = function()
+      M.request_viewport_update()
+    end,
   })
 
   vim.api.nvim_create_autocmd('VimResized', {
     group = M.augroup,
     callback = function()
-      vim.schedule(function() M.full_update() end)
+      M.request_viewport_update()
     end,
   })
 
-  -- Content changes -> full recompute
+  -- Content changes -> debounced full recompute
   if M.target_win and vim.api.nvim_win_is_valid(M.target_win) then
     local target_buf = vim.api.nvim_win_get_buf(M.target_win)
     if vim.api.nvim_buf_is_valid(target_buf) then
-      vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufWritePost' }, {
+      vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
         group = M.augroup,
         buffer = target_buf,
         callback = function()
-          vim.schedule(function() M.full_update() end)
+          M.request_content_update()
         end,
       })
     end
@@ -287,6 +429,7 @@ end
 function M.close()
   vim.api.nvim_clear_autocmds({ group = M.augroup })
   close_debounce_timer()
+  close_content_timer()
 
   if M.win and vim.api.nvim_win_is_valid(M.win) then
     vim.api.nvim_win_close(M.win, true)
@@ -304,6 +447,12 @@ function M.close()
   M.cached_pixels = nil
   M.pixel_count = 0
   M.total_logical = 0
+  M.content_dirty = false
+  M.full_update_pending = false
+  M.full_update_running = false
+  M.last_changedtick = nil
+  M.last_new_line_count = 0
+  M.last_pixel_count = 0
 end
 
 --- Reset the highlight cache (e.g. after colorscheme change).

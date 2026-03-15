@@ -585,10 +585,10 @@ function M.refresh(file)
   -- Refresh diff
   vim.cmd('diffupdate')
 
-  -- Refresh minimap with new old_lines
+  -- Keep the minimap's git baseline in sync with the left pane refresh.
   local minimap = require('glance.minimap')
   minimap.old_lines = old_lines
-  minimap.full_update()
+  minimap.flush_content_update({ run_even_if_clean = true })
 end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.

@@ -1,6 +1,28 @@
 local A = require('tests.helpers.assert')
 local N = require('tests.helpers.nvim')
 
+local function with_counted_function(tbl, key, fn)
+  local original = tbl[key]
+  local calls = 0
+
+  tbl[key] = function(...)
+    calls = calls + 1
+    return original(...)
+  end
+
+  local ok, err = xpcall(function()
+    return fn(function()
+      return calls
+    end)
+  end, debug.traceback)
+
+  tbl[key] = original
+
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
   name = 'minimap',
   cases = {
@@ -119,6 +141,124 @@ return {
           ui.open_file(filetree.files.changes[1])
           local config = vim.api.nvim_win_get_config(minimap.win)
           A.equal(config.width, 3)
+        end)
+      end,
+    },
+    {
+      name = 'content edits are coalesced into one full update',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+
+          with_counted_function(minimap, 'full_update', function(get_calls)
+            vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, {
+              'one',
+              'two',
+              'three',
+            })
+            minimap.request_content_update()
+
+            vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, {
+              'one',
+              'two updated',
+              'three',
+            })
+            minimap.request_content_update()
+
+            vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, {
+              'one',
+              'two updated',
+              'three updated',
+            })
+            minimap.request_content_update()
+
+            N.wait(500, function()
+              return get_calls() >= 1
+            end)
+            vim.wait(200)
+
+            A.equal(get_calls(), 1)
+          end)
+        end)
+      end,
+    },
+    {
+      name = 'viewport updates stay on the cached render path',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local minimap = require('glance.minimap')
+
+          with_counted_function(minimap, 'full_update', function(get_calls)
+            minimap.request_viewport_update()
+            minimap.request_viewport_update()
+            minimap.request_viewport_update()
+            vim.wait(100)
+
+            A.equal(get_calls(), 0)
+          end)
+        end)
+      end,
+    },
+    {
+      name = 'write flushes pending content work once and updates the minimap immediately',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+
+          with_counted_function(minimap, 'full_update', function(get_calls)
+            vim.api.nvim_set_current_win(diffview.new_win)
+            N.press('Goafter save<Esc>')
+
+            vim.api.nvim_buf_call(diffview.new_buf, function()
+              vim.cmd('write')
+            end)
+
+            N.wait(500, function()
+              return minimap.total_logical == 4 and get_calls() >= 1
+            end)
+            vim.wait(200)
+
+            A.equal(minimap.total_logical, 4)
+            A.equal(get_calls(), 1)
+          end)
+        end)
+      end,
+    },
+    {
+      name = 'unchanged full updates skip redundant diff recompute',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local logic = require('glance.minimap_logic')
+          local minimap = require('glance.minimap')
+
+          with_counted_function(logic, 'compute_line_types', function(get_calls)
+            minimap.full_update()
+            minimap.full_update()
+
+            A.equal(get_calls(), 0)
+          end)
         end)
       end,
     },
