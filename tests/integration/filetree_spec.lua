@@ -11,11 +11,29 @@ return {
           require('glance').start()
           local filetree = require('glance.filetree')
           local selected = filetree.get_selected_file()
+          local keymaps = vim.api.nvim_buf_get_keymap(filetree.buf, 'n')
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 2, false)
+          local saw_discard = false
+          local saw_discard_all = false
+
+          for _, map in ipairs(keymaps) do
+            if map.lhs == 'd' then
+              saw_discard = true
+            elseif map.lhs == 'D' then
+              saw_discard_all = true
+            end
+          end
 
           A.equal(vim.api.nvim_get_option_value('buftype', { buf = filetree.buf }), 'nofile')
           A.equal(vim.api.nvim_get_option_value('swapfile', { buf = filetree.buf }), false)
           A.equal(vim.api.nvim_get_option_value('filetype', { buf = filetree.buf }), 'glance')
-          A.equal(filetree.selected_line, 2)
+          A.truthy(saw_discard)
+          A.truthy(saw_discard_all)
+          A.same(lines, {
+            '  discard',
+            '  [d] file   [D] all',
+          })
+          A.equal(filetree.selected_line, 5)
           A.equal(selected.path, repo.files.tracked)
         end)
       end,
@@ -32,19 +50,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 2)
-          N.press('j')
           A.equal(filetree.selected_line, 5)
           N.press('j')
           A.equal(filetree.selected_line, 8)
+          N.press('j')
+          A.equal(filetree.selected_line, 11)
           N.press('k')
-          A.equal(filetree.selected_line, 5)
-          N.press('K')
-          A.equal(filetree.selected_line, 2)
-          N.press('J')
-          A.equal(filetree.selected_line, 5)
-          N.press('2j')
           A.equal(filetree.selected_line, 8)
+          N.press('K')
+          A.equal(filetree.selected_line, 5)
+          N.press('J')
+          A.equal(filetree.selected_line, 8)
+          N.press('2j')
+          A.equal(filetree.selected_line, 11)
         end)
       end,
     },
@@ -110,6 +128,73 @@ return {
           filetree.toggle()
           A.truthy(filetree.win and vim.api.nvim_win_is_valid(filetree.win))
           A.equal(vim.api.nvim_get_current_win(), diffview.new_win)
+        end)
+      end,
+    },
+    {
+      name = 'discard selected file honors confirm and closes the active diff when needed',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          local diffview = require('glance.diffview')
+          local git = require('glance.git')
+
+          ui.open_file(filetree.files.changes[1])
+          vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, { 'unsaved change' })
+          vim.api.nvim_set_current_win(filetree.win)
+
+          N.with_confirm(2, function()
+            N.press('d')
+          end)
+          A.truthy(ui.diff_open)
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta modified\ngamma\n')
+
+          N.with_confirm(1, function()
+            N.press('d')
+          end)
+
+          A.falsy(ui.diff_open)
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
+          A.same(git.get_changed_files(), {
+            staged = {},
+            changes = {},
+            untracked = {},
+          })
+        end)
+      end,
+    },
+    {
+      name = 'discard all honors confirm and resets the repo state',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          repo.files.staged_add = 'new-file.txt'
+          repo.files.untracked = 'scratch.txt'
+          repo:write(repo.files.staged_add, 'new staged file\n')
+          repo:stage(repo.files.staged_add)
+          repo:write(repo.files.untracked, 'scratch\n')
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+
+          vim.api.nvim_set_current_win(filetree.win)
+
+          N.with_confirm(2, function()
+            N.press('D')
+          end)
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta modified\ngamma\n')
+          A.truthy(vim.uv.fs_stat(repo:path(repo.files.staged_add)))
+          A.truthy(vim.uv.fs_stat(repo:path(repo.files.untracked)))
+
+          N.with_confirm(1, function()
+            N.press('D')
+          end)
+
+          A.equal(vim.trim(repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })), '')
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.staged_add)))
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.untracked)))
         end)
       end,
     },

@@ -4,6 +4,44 @@ local function empty_files()
   return { staged = {}, changes = {}, untracked = {} }
 end
 
+local function run_git(args)
+  local root = M.repo_root()
+  if not root then
+    return false, 'not a git repository'
+  end
+
+  local cmd = { 'git', '-C', root }
+  vim.list_extend(cmd, args)
+  local output = vim.fn.system(cmd)
+  if vim.v.shell_error ~= 0 then
+    local message = vim.trim(output)
+    if message == '' then
+      message = 'git command failed'
+    end
+    return false, message
+  end
+
+  return true, output
+end
+
+local function path_exists_at_head(filepath)
+  return run_git({ 'cat-file', '-e', 'HEAD:' .. filepath })
+end
+
+local function delete_worktree_path(filepath)
+  local root = M.repo_root()
+  if not root then
+    return
+  end
+  vim.fn.delete(root .. '/' .. filepath, 'rf')
+end
+
+local function discard_new_path(filepath)
+  run_git({ 'rm', '-f', '--', filepath })
+  run_git({ 'rm', '--cached', '-f', '--', filepath })
+  delete_worktree_path(filepath)
+end
+
 --- Check if the current directory is inside a git repository.
 function M.is_repo()
   local result = vim.fn.system('git rev-parse --is-inside-work-tree 2>/dev/null')
@@ -159,6 +197,45 @@ function M.is_binary(filepath)
   )
   -- Binary files show "-\t-\t" in numstat output
   return result:match('^%-\t%-\t') ~= nil
+end
+
+--- Discard all git-visible changes for a single file path.
+--- This restores tracked files to HEAD and removes new files not present in HEAD.
+--- @param file { path: string, old_path: string|nil }|nil
+--- @return boolean, string|nil
+function M.discard_file(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return false, 'invalid file target'
+  end
+
+  if file.old_path and path_exists_at_head(file.old_path) then
+    local ok, err = run_git({ 'restore', '--source=HEAD', '--staged', '--worktree', '--', file.old_path })
+    if not ok then
+      return false, err
+    end
+    if file.path ~= file.old_path then
+      discard_new_path(file.path)
+    end
+    return true
+  end
+
+  if path_exists_at_head(file.path) then
+    return run_git({ 'restore', '--source=HEAD', '--staged', '--worktree', '--', file.path })
+  end
+
+  discard_new_path(file.path)
+  return true
+end
+
+--- Discard all tracked, staged, and untracked changes in the repository.
+--- @return boolean, string|nil
+function M.discard_all()
+  local ok, err = run_git({ 'reset', '--hard', 'HEAD' })
+  if not ok then
+    return false, err
+  end
+
+  return run_git({ 'clean', '-fd' })
 end
 
 return M

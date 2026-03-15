@@ -29,6 +29,9 @@ return {
         })
 
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  discard',
+          '  [d] file   [D] all',
+          '',
           '  Staged Changes',
           '    M staged.txt',
           '',
@@ -38,7 +41,7 @@ return {
           '  Untracked',
           '    ? new.txt',
         })
-        A.equal(filetree.selected_line, 2)
+        A.equal(filetree.selected_line, 5)
       end,
     },
     {
@@ -58,7 +61,7 @@ return {
           untracked = {},
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[2], '    R old/path.txt → new/path.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    R old/path.txt → new/path.txt')
       end,
     },
     {
@@ -80,7 +83,7 @@ return {
           untracked = {},
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[2], '    + added.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    + added.txt')
       end,
     },
     {
@@ -94,6 +97,8 @@ return {
         })
 
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  discard',
+          '  [d] file   [D] all',
           '',
           '  No changes found',
         })

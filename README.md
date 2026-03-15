@@ -63,12 +63,13 @@ Built-in theme presets:
 
 The welcome screen is always part of startup. `welcome` only controls its animation timing, not whether it appears.
 
+In the file tree, `d` discards the selected file and `D` discards all repo changes. Both actions prompt for confirmation before making changes.
+
 ## Roadmap
 
 - [x] Add tests
 - [x] Hide statusline config option
 - [x] Yellow glance logo
 - [x] Add a white theme preset
-- [ ] Get "Discard all changes" and single "Discard changes" functionality working
+- [x] Get "Discard all changes" and single "Discard changes" functionality working
 - [ ] Verify all the code
-

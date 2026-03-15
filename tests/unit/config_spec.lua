@@ -82,6 +82,8 @@ return {
             next_section = 'J',
             prev_section = 'K',
             toggle_filetree = '<Tab>',
+            discard_file = 'd',
+            discard_all = 'D',
           },
           hunk_navigation = {},
           signs = {
@@ -136,6 +138,7 @@ return {
           },
           keymaps = {
             quit = 'x',
+            discard_file = 'x',
           },
           minimap = {
             enabled = false,
@@ -155,6 +158,8 @@ return {
         A.equal(config.options.hunk_navigation.prev, nil)
         A.equal(config.options.keymaps.quit, 'x')
         A.equal(config.options.keymaps.open_file, '<CR>')
+        A.equal(config.options.keymaps.discard_file, 'x')
+        A.equal(config.options.keymaps.discard_all, 'D')
         A.equal(config.options.minimap.enabled, false)
         A.equal(config.options.watch.enabled, true)
       end,
@@ -291,6 +296,23 @@ return {
 
         A.falsy(ok)
         A.match(err, 'hunk_navigation%.next conflicts with keymaps%.toggle_filetree')
+      end,
+    },
+    {
+      name = 'discard keymaps must be different',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            keymaps = {
+              discard_file = 'd',
+              discard_all = 'd',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'keymaps%.discard_file and keymaps%.discard_all must be different')
       end,
     },
   },

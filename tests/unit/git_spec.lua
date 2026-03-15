@@ -125,5 +125,46 @@ return {
         end)
       end,
     },
+    {
+      name = 'integration discard_file restores a path back to HEAD',
+      run = function()
+        N.with_repo('repo_mixed_mm', function(repo)
+          local git = require('glance.git')
+          local files = git.get_changed_files()
+          local ok, err = git.discard_file(files.changes[1])
+
+          A.truthy(ok, err)
+          A.same(git.get_changed_files(), {
+            staged = {},
+            changes = {},
+            untracked = {},
+          })
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
+        end)
+      end,
+    },
+    {
+      name = 'integration discard_all resets tracked staged and untracked changes',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          local git = require('glance.git')
+
+          repo.files.staged_add = 'new-file.txt'
+          repo.files.untracked = 'scratch.txt'
+          repo:write(repo.files.staged_add, 'new staged file\n')
+          repo:stage(repo.files.staged_add)
+          repo:write(repo.files.untracked, 'scratch\n')
+
+          local ok, err = git.discard_all()
+          local status = repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })
+
+          A.truthy(ok, err)
+          A.equal(vim.trim(status), '')
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.staged_add)))
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.untracked)))
+        end)
+      end,
+    },
   },
 }

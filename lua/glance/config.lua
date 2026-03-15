@@ -105,6 +105,8 @@ local ALLOWED_KEYMAPS = {
   next_section = true,
   prev_section = true,
   toggle_filetree = true,
+  discard_file = true,
+  discard_all = true,
 }
 
 local ALLOWED_HUNK_NAVIGATION = {
@@ -183,6 +185,8 @@ local BASE_DEFAULTS = {
     next_section = 'J',
     prev_section = 'K',
     toggle_filetree = '<Tab>',
+    discard_file = 'd',
+    discard_all = 'D',
   },
   hunk_navigation = {},
   signs = {
@@ -339,6 +343,9 @@ local function validate_keymaps(options)
   validate_known_keys(keymaps, ALLOWED_KEYMAPS, 'keymaps')
   for key, value in pairs(keymaps) do
     validate_string(value, 'keymaps.' .. key)
+  end
+  if keymaps.discard_file == keymaps.discard_all then
+    fail('keymaps.discard_file and keymaps.discard_all must be different')
   end
 end
 

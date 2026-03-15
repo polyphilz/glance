@@ -1,6 +1,8 @@
 local config = require('glance.config')
 
 local M = {}
+local FILETREE_NS = vim.api.nvim_create_namespace('glance_filetree')
+local LEGEND_LINE_COUNT = 3
 
 -- State
 M.buf = nil
@@ -33,6 +35,36 @@ local function status_text(status)
     ['?'] = signs.untracked,
   }
   return map[status] or status
+end
+
+local function display_path(file)
+  if file.old_path then
+    return file.old_path .. ' → ' .. file.path
+  end
+  return file.path
+end
+
+local function add_highlight(highlights, line, col_start, col_end, group)
+  highlights[#highlights + 1] = { line, col_start, col_end, group }
+end
+
+local function add_legend(lines, highlights)
+  local km = config.options.keymaps
+  local title = '  discard'
+  local actions = '  [' .. km.discard_file .. '] file   [' .. km.discard_all .. '] all'
+
+  lines[#lines + 1] = title
+  lines[#lines + 1] = actions
+  lines[#lines + 1] = ''
+
+  add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
+  add_highlight(highlights, 2, 0, #actions, 'GlanceLegendText')
+  add_highlight(highlights, 2, 2, 3, 'GlanceLegendBracket')
+  add_highlight(highlights, 2, 3, 4, 'GlanceLegendKey')
+  add_highlight(highlights, 2, 4, 5, 'GlanceLegendBracket')
+  add_highlight(highlights, 2, 13, 14, 'GlanceLegendBracket')
+  add_highlight(highlights, 2, 14, 15, 'GlanceLegendKey')
+  add_highlight(highlights, 2, 15, 16, 'GlanceLegendBracket')
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -84,6 +116,7 @@ function M.render(files)
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
+  add_legend(lines, highlights)
 
   local function add_section(title, file_list)
     if #file_list == 0 then
@@ -91,7 +124,7 @@ function M.render(files)
     end
 
     -- Blank line before section (except at the very start)
-    if #lines > 0 then
+    if #lines > LEGEND_LINE_COUNT then
       table.insert(lines, '')
       -- line_map entry is nil by default (no action needed)
     end
@@ -99,23 +132,19 @@ function M.render(files)
     -- Section header
     local header = '  ' .. title
     table.insert(lines, header)
-    table.insert(highlights, { #lines, 0, #header, 'GlanceSectionHeader' })
+    add_highlight(highlights, #lines, 0, #header, 'GlanceSectionHeader')
     -- line_map entry is nil by default (no action needed)
 
     -- File entries
     for _, file in ipairs(file_list) do
-      local display_path = file.path
-      if file.old_path then
-        display_path = file.old_path .. ' → ' .. file.path
-      end
-      local line = '    ' .. status_text(file.status) .. ' ' .. display_path
+      local line = '    ' .. status_text(file.status) .. ' ' .. display_path(file)
       table.insert(lines, line)
       M.line_map[#lines] = file
 
       -- Highlight the status character
       local hl_group = M.status_highlight(file.status)
       if hl_group then
-        table.insert(highlights, { #lines, 4, 5, hl_group })
+        add_highlight(highlights, #lines, 4, 5, hl_group)
       end
     end
   end
@@ -125,10 +154,9 @@ function M.render(files)
   add_section('Untracked', files.untracked)
 
   -- Handle empty state
-  if #lines == 0 then
-    lines = { '', '  No changes found' }
-    M.line_map = { nil, nil }
-    highlights = { { 2, 0, 20, 'Comment' } }
+  if #lines == LEGEND_LINE_COUNT then
+    lines[#lines + 1] = '  No changes found'
+    add_highlight(highlights, #lines, 0, 20, 'Comment')
   end
 
   -- Write to buffer
@@ -137,10 +165,9 @@ function M.render(files)
   vim.api.nvim_buf_set_option(M.buf, 'modifiable', false)
 
   -- Apply highlights
-  local ns = vim.api.nvim_create_namespace('glance_filetree')
-  vim.api.nvim_buf_clear_namespace(M.buf, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(M.buf, FILETREE_NS, 0, -1)
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(M.buf, ns, hl[4], hl[1] - 1, hl[2], hl[3])
+    vim.api.nvim_buf_add_highlight(M.buf, FILETREE_NS, hl[4], hl[1] - 1, hl[2], hl[3])
   end
 
   -- Place cursor on the first file entry
@@ -353,6 +380,70 @@ function M.toggle()
   end
 end
 
+local function confirm_action(message, accept_label)
+  return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
+end
+
+local function refresh_after_discard(active_file)
+  local ui = require('glance.ui')
+  M.refresh()
+  if ui.diff_open and active_file then
+    M.highlight_active(active_file)
+  end
+end
+
+function M.discard_selected_file()
+  local file = M.get_selected_file()
+  if not file then
+    return
+  end
+
+  if not confirm_action('Discard changes for ' .. display_path(file) .. '?', 'Discard') then
+    return
+  end
+
+  local ui = require('glance.ui')
+  local diffview = require('glance.diffview')
+  local active_file = M.active_file
+  if ui.diff_open and active_file and active_file.path == file.path then
+    diffview.close(true)
+    active_file = nil
+  end
+
+  local ok, err = require('glance.git').discard_file(file)
+  if not ok then
+    vim.notify(
+      'glance: failed to discard ' .. display_path(file) .. ': ' .. tostring(err),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  refresh_after_discard(active_file)
+end
+
+function M.discard_all()
+  if not confirm_action(
+    'Discard all changes in this repository? This will also remove untracked files.',
+    'Discard All'
+  ) then
+    return
+  end
+
+  local ui = require('glance.ui')
+  if ui.diff_open then
+    require('glance.diffview').close(true)
+  end
+
+  local ok, err = require('glance.git').discard_all()
+  if not ok then
+    vim.notify('glance: failed to discard all changes: ' .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+
+  M.refresh()
+end
+
 --- Set up buffer-local keymaps for the file tree.
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
@@ -365,6 +456,8 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)
   vim.keymap.set('n', km.refresh, function() M.refresh() end, opts)
   vim.keymap.set('n', km.toggle_filetree, function() M.toggle() end, opts)
+  vim.keymap.set('n', km.discard_file, function() M.discard_selected_file() end, opts)
+  vim.keymap.set('n', km.discard_all, function() M.discard_all() end, opts)
   vim.keymap.set('n', km.open_file, function()
     local file = M.get_selected_file()
     if file then

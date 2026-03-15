@@ -181,6 +181,10 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceStatusR', { fg = type_color })
   vim.api.nvim_set_hl(0, 'GlanceStatusU', { fg = palette.untracked })
   vim.api.nvim_set_hl(0, 'GlanceActiveFile', { bg = selection })
+  vim.api.nvim_set_hl(0, 'GlanceLegendTitle', { fg = comment, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceLegendBracket', { fg = palette.split, bg = bg })
+  vim.api.nvim_set_hl(0, 'GlanceLegendKey', { fg = param, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceLegendText', { fg = comment, bg = bg })
 
   -- Minimap highlights
   require('glance.minimap').setup_highlights()
