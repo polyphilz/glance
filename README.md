@@ -69,5 +69,6 @@ The welcome screen is always part of startup. `welcome` only controls its animat
 - [x] Hide statusline config option
 - [x] Yellow glance logo
 - [x] Add a white theme preset
-- [ ] When free scrolling on left-hand side pane, right-hand side pane doesn't move, but reverse isn't true
+- [ ] Get "Discard all changes" and single "Discard changes" functionality working
 - [ ] Verify all the code
+
