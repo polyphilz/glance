@@ -7,7 +7,7 @@ local LEGEND_LINE_COUNT = 3
 -- State
 M.buf = nil
 M.win = nil
-M.files = nil        -- The full files table { staged, changes, untracked }
+M.files = nil        -- The full files table { staged, changes, untracked, conflicts }
 M.line_map = {}      -- Maps buffer line number -> file object (nil for headers/blanks)
 M.active_file = nil  -- Currently viewed file in diff mode
 M.selected_line = nil -- Tracks the cursor line set by j/k/J/K navigation

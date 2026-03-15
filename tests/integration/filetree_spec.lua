@@ -161,6 +161,7 @@ return {
             staged = {},
             changes = {},
             untracked = {},
+            conflicts = {},
           })
         end)
       end,

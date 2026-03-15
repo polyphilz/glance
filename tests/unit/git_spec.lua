@@ -1,6 +1,28 @@
 local A = require('tests.helpers.assert')
 local N = require('tests.helpers.nvim')
 
+local function files(overrides)
+  return vim.tbl_extend('force', {
+    staged = {},
+    changes = {},
+    untracked = {},
+    conflicts = {},
+  }, overrides or {})
+end
+
+local function file(overrides)
+  return vim.tbl_extend('force', {
+    path = '',
+    section = '',
+    status = '',
+    display_status = '',
+    kind = '',
+    x = '',
+    y = '',
+    raw_status = '',
+  }, overrides or {})
+end
+
 return {
   name = 'git',
   cases = {
@@ -8,10 +30,40 @@ return {
       name = 'parse handles empty output',
       run = function()
         local git = require('glance.git')
-        A.same(git.parse_porcelain_status(''), {
-          staged = {},
-          changes = {},
-          untracked = {},
+        A.same(git.parse_porcelain_status(''), files())
+      end,
+    },
+    {
+      name = 'low-level parse preserves raw status and old path for rename and copy entries',
+      run = function()
+        local git = require('glance.git')
+        local entries = git.parse_porcelain_entries(table.concat({
+          'R  old/name.txt -> new/name.txt',
+          'C  src/original.txt -> src/copy.txt',
+          '?? scratch.txt',
+        }, '\n'))
+
+        A.same(entries, {
+          {
+            path = 'new/name.txt',
+            old_path = 'old/name.txt',
+            x = 'R',
+            y = ' ',
+            raw_status = 'R ',
+          },
+          {
+            path = 'src/copy.txt',
+            old_path = 'src/original.txt',
+            x = 'C',
+            y = ' ',
+            raw_status = 'C ',
+          },
+          {
+            path = 'scratch.txt',
+            x = '?',
+            y = '?',
+            raw_status = '??',
+          },
         })
       end,
     },
@@ -25,26 +77,44 @@ return {
           '?? new.txt',
         }, '\n'))
 
-        A.length(parsed.changes, 1)
-        A.same(parsed.changes[1], {
-          path = 'changed.txt',
-          status = 'M',
-          section = 'changes',
-          old_path = nil,
-        })
-        A.length(parsed.staged, 1)
-        A.same(parsed.staged[1], {
-          path = 'staged.txt',
-          status = 'M',
-          section = 'staged',
-          old_path = nil,
-        })
-        A.length(parsed.untracked, 1)
-        A.same(parsed.untracked[1], {
-          path = 'new.txt',
-          status = '?',
-          section = 'untracked',
-        })
+        A.same(parsed, files({
+          changes = {
+            file({
+              path = 'changed.txt',
+              section = 'changes',
+              status = 'M',
+              display_status = 'M',
+              kind = 'modified',
+              x = ' ',
+              y = 'M',
+              raw_status = ' M',
+            }),
+          },
+          staged = {
+            file({
+              path = 'staged.txt',
+              section = 'staged',
+              status = 'M',
+              display_status = 'M',
+              kind = 'modified',
+              x = 'M',
+              y = ' ',
+              raw_status = 'M ',
+            }),
+          },
+          untracked = {
+            file({
+              path = 'new.txt',
+              section = 'untracked',
+              status = '?',
+              display_status = '?',
+              kind = 'untracked',
+              x = '?',
+              y = '?',
+              raw_status = '??',
+            }),
+          },
+        }))
       end,
     },
     {
@@ -53,14 +123,35 @@ return {
         local git = require('glance.git')
         local parsed = git.parse_porcelain_status('MM mixed.txt')
 
-        A.length(parsed.staged, 1)
-        A.length(parsed.changes, 1)
-        A.equal(parsed.staged[1].path, 'mixed.txt')
-        A.equal(parsed.changes[1].path, 'mixed.txt')
+        A.same(parsed.staged, {
+          file({
+            path = 'mixed.txt',
+            section = 'staged',
+            status = 'M',
+            display_status = 'M',
+            kind = 'modified',
+            x = 'M',
+            y = 'M',
+            raw_status = 'MM',
+          }),
+        })
+        A.same(parsed.changes, {
+          file({
+            path = 'mixed.txt',
+            section = 'changes',
+            status = 'M',
+            display_status = 'M',
+            kind = 'modified',
+            x = 'M',
+            y = 'M',
+            raw_status = 'MM',
+          }),
+        })
+        A.same(parsed.conflicts, {})
       end,
     },
     {
-      name = 'parse preserves rename old path and deletes',
+      name = 'parse preserves rename old path and classifies deletes',
       run = function()
         local git = require('glance.git')
         local parsed = git.parse_porcelain_status(table.concat({
@@ -68,12 +159,119 @@ return {
           ' D gone.txt',
         }, '\n'))
 
-        A.length(parsed.staged, 1)
-        A.equal(parsed.staged[1].old_path, 'old/name.txt')
-        A.equal(parsed.staged[1].path, 'new/name.txt')
-        A.length(parsed.changes, 1)
-        A.equal(parsed.changes[1].status, 'D')
-        A.equal(parsed.changes[1].path, 'gone.txt')
+        A.same(parsed.staged, {
+          file({
+            path = 'new/name.txt',
+            old_path = 'old/name.txt',
+            section = 'staged',
+            status = 'R',
+            display_status = 'R',
+            kind = 'renamed',
+            x = 'R',
+            y = ' ',
+            raw_status = 'R ',
+          }),
+        })
+        A.same(parsed.changes, {
+          file({
+            path = 'gone.txt',
+            section = 'changes',
+            status = 'D',
+            display_status = 'D',
+            kind = 'deleted',
+            x = ' ',
+            y = 'D',
+            raw_status = ' D',
+          }),
+        })
+      end,
+    },
+    {
+      name = 'parse routes all unmerged status pairs into conflicts',
+      run = function()
+        local git = require('glance.git')
+        local pairs = {
+          'DD',
+          'AU',
+          'UD',
+          'UA',
+          'DU',
+          'AA',
+          'UU',
+        }
+        local lines = {}
+        local expected = {}
+
+        for _, pair in ipairs(pairs) do
+          local path = pair:lower() .. '.txt'
+          lines[#lines + 1] = pair .. ' ' .. path
+          expected[#expected + 1] = file({
+            path = path,
+            section = 'conflicts',
+            status = 'U',
+            display_status = 'U',
+            kind = 'conflicted',
+            x = pair:sub(1, 1),
+            y = pair:sub(2, 2),
+            raw_status = pair,
+          })
+        end
+
+        local parsed = git.parse_porcelain_status(table.concat(lines, '\n'))
+
+        A.same(parsed, files({
+          conflicts = expected,
+        }))
+      end,
+    },
+    {
+      name = 'classify handles type-changed copied conflicted and unsupported entries',
+      run = function()
+        local git = require('glance.git')
+
+        A.same(git.classify_entry({
+          path = 'symlink.txt',
+          x = 'T',
+          y = ' ',
+          raw_status = 'T ',
+        }, 'staged'), {
+          kind = 'type_changed',
+          status = 'T',
+          display_status = 'T',
+        })
+
+        A.same(git.classify_entry({
+          path = 'copy.txt',
+          x = ' ',
+          y = 'C',
+          raw_status = ' C',
+        }, 'changes'), {
+          kind = 'copied',
+          status = 'C',
+          display_status = 'C',
+        })
+
+        A.same(git.classify_entry({
+          path = 'conflict.txt',
+          x = 'U',
+          y = 'U',
+          raw_status = 'UU',
+        }, 'staged'), {
+          kind = 'conflicted',
+          status = 'U',
+          display_status = 'U',
+        })
+
+        A.same(git.classify_entry({
+          path = 'mystery.txt',
+          x = 'X',
+          y = ' ',
+          raw_status = 'X ',
+        }, 'staged'), {
+          kind = 'unsupported',
+          status = 'X',
+          display_status = 'X',
+        })
       end,
     },
     {
@@ -84,11 +282,16 @@ return {
           A.truthy(git.is_repo())
           A.equal(git.repo_root(), repo.root)
 
-          local files = git.get_changed_files()
-          A.length(files.staged, 1)
-          A.length(files.changes, 1)
-          A.equal(files.staged[1].path, repo.files.tracked)
-          A.equal(files.changes[1].path, repo.files.tracked)
+          local files_in_repo = git.get_changed_files()
+          A.length(files_in_repo.staged, 1)
+          A.length(files_in_repo.changes, 1)
+          A.length(files_in_repo.conflicts, 0)
+          A.equal(files_in_repo.staged[1].path, repo.files.tracked)
+          A.equal(files_in_repo.staged[1].kind, 'modified')
+          A.equal(files_in_repo.staged[1].raw_status, 'MM')
+          A.equal(files_in_repo.changes[1].path, repo.files.tracked)
+          A.equal(files_in_repo.changes[1].kind, 'modified')
+          A.equal(files_in_repo.changes[1].raw_status, 'MM')
 
           A.same(git.get_file_content(repo.files.tracked, 'HEAD'), {
             'alpha',
@@ -107,6 +310,56 @@ return {
             'unstaged tail',
           })
           A.same(git.get_file_content('missing.txt', 'HEAD'), {})
+        end)
+      end,
+    },
+    {
+      name = 'integration classifies real merge conflicts into the conflicts section',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local changed = git.get_changed_files()
+
+          A.same(changed.staged, {})
+          A.same(changed.changes, {})
+          A.same(changed.untracked, {})
+          A.same(changed.conflicts, {
+            file({
+              path = repo.files.tracked,
+              section = 'conflicts',
+              status = 'U',
+              display_status = 'U',
+              kind = 'conflicted',
+              x = 'U',
+              y = 'U',
+              raw_status = 'UU',
+            }),
+          })
+        end)
+      end,
+    },
+    {
+      name = 'integration classifies type changes from git status',
+      run = function()
+        N.with_repo('repo_type_change', function(repo)
+          local git = require('glance.git')
+          local changed = git.get_changed_files()
+
+          A.same(changed.staged, {})
+          A.same(changed.untracked, {})
+          A.same(changed.conflicts, {})
+          A.same(changed.changes, {
+            file({
+              path = repo.files.tracked,
+              section = 'changes',
+              status = 'T',
+              display_status = 'T',
+              kind = 'type_changed',
+              x = ' ',
+              y = 'T',
+              raw_status = ' T',
+            }),
+          })
         end)
       end,
     },
@@ -130,15 +383,11 @@ return {
       run = function()
         N.with_repo('repo_mixed_mm', function(repo)
           local git = require('glance.git')
-          local files = git.get_changed_files()
-          local ok, err = git.discard_file(files.changes[1])
+          local changed = git.get_changed_files()
+          local ok, err = git.discard_file(changed.changes[1])
 
           A.truthy(ok, err)
-          A.same(git.get_changed_files(), {
-            staged = {},
-            changes = {},
-            untracked = {},
-          })
+          A.same(git.get_changed_files(), files())
           A.equal(repo:read(repo.files.tracked), 'alpha\nbeta\ngamma\n')
         end)
       end,

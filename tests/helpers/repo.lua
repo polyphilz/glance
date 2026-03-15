@@ -66,6 +66,11 @@ local function new_fixture(root)
     vim.fn.delete(self:path(relpath), 'rf')
   end
 
+  function fixture:symlink(target, relpath)
+    ensure_parent_dir(self:path(relpath))
+    run_command({ 'ln', '-s', target, self:path(relpath) })
+  end
+
   function fixture:rename(from_relpath, to_relpath)
     ensure_parent_dir(self:path(to_relpath))
     assert(os.rename(self:path(from_relpath), self:path(to_relpath)))
@@ -161,6 +166,30 @@ function scenarios.repo_rename(fixture)
   seed_committed_file(fixture, 'rename-before.txt', 'rename me\n', 'renamed_old')
   fixture.files.renamed_new = 'rename-after.txt'
   fixture:git({ 'mv', fixture.files.renamed_old, fixture.files.renamed_new })
+end
+
+function scenarios.repo_conflict(fixture)
+  seed_committed_file(fixture, 'tracked.txt', 'base\n')
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, 'feature\n')
+  fixture:commit_all('Feature change')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.tracked, 'main\n')
+  fixture:commit_all('Main change')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected merge conflict fixture')
+end
+
+function scenarios.repo_type_change(fixture)
+  seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
+  fixture:remove(fixture.files.tracked)
+  fixture:symlink('replacement-target', fixture.files.tracked)
 end
 
 function scenarios.repo_binary(fixture)
