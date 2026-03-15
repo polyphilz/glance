@@ -9,6 +9,7 @@ while [ -L "$SCRIPT" ]; do
   [[ "$SCRIPT" != /* ]] && SCRIPT="$SCRIPT_DIR/$SCRIPT"
 done
 GLANCE_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+export GLANCE_ROOT
 
 # Verify we're inside a git repository
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
@@ -18,5 +19,5 @@ fi
 
 # Launch neovim in minimal mode with only the glance plugin
 exec nvim --clean \
-  --cmd "set rtp+=$GLANCE_ROOT" \
+  --cmd "lua vim.opt.runtimepath:append(vim.env.GLANCE_ROOT)" \
   -c "lua require('glance.bootstrap').run()"
