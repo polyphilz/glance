@@ -1,7 +1,6 @@
 <div align="center">
 
 <img src="assets/readme/dist/glance-hero-stars.gif" width="640" alt="Animated glance hero">
-<h1>glance</h1>
 
 A standalone Git diff review CLI tool powered by Neovim.
 
