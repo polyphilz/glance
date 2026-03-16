@@ -59,7 +59,15 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
    esac
    ```
 
-3. Run it inside any Git repository:
+3. Optional: create a starter config file:
+
+   ```bash
+   glance init-config
+   ```
+
+   This writes a starter config to `~/.config/glance/config.lua` by default. If `GLANCE_CONFIG` is set, Glance writes there instead.
+
+4. Run it inside any Git repository:
 
    ```bash
    cd /path/to/repo
@@ -139,6 +147,18 @@ Default keys:
 ## Configuration
 
 Glance loads an optional Lua config file automatically. The most common location is `~/.config/glance/config.lua`, or you can point `GLANCE_CONFIG` at a custom file.
+
+Create a starter config automatically:
+
+```bash
+glance init-config
+```
+
+If you want to overwrite an existing config file:
+
+```bash
+glance init-config --force
+```
 
 The config file must `return` a Lua table.
 

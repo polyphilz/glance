@@ -17,6 +17,10 @@ Usage:
   glance
   glance --help
   glance --version
+  glance init-config [--force]
+
+Commands:
+  init-config  Write a starter config file to the default config path.
 
 Requirements:
   - git on PATH
@@ -25,6 +29,7 @@ Requirements:
 Notes:
   - Run glance inside a git repository.
   - Set GLANCE_CONFIG to load a config file from a custom path.
+  - init-config uses GLANCE_CONFIG, then XDG_CONFIG_HOME, then ~/.config/glance/config.lua.
 EOF
 }
 
@@ -79,6 +84,73 @@ repo_has_changes() {
   [ -n "$status_output" ]
 }
 
+config_path() {
+  if [ -n "${GLANCE_CONFIG:-}" ]; then
+    printf '%s\n' "$GLANCE_CONFIG"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    printf '%s/glance/config.lua\n' "$XDG_CONFIG_HOME"
+  else
+    printf '%s/.config/glance/config.lua\n' "$HOME"
+  fi
+}
+
+write_starter_config() {
+  local path="$1"
+
+  cat >"$path" <<'EOF'
+return {
+  theme = {
+    preset = 'seti_black',
+  },
+  windows = {
+    filetree = {
+      width = 30,
+    },
+    diff = {
+      relativenumber = true,
+    },
+  },
+  minimap = {
+    enabled = true,
+    width = 1,
+  },
+}
+EOF
+}
+
+init_config() {
+  local force="false"
+  local path=""
+  local dir=""
+
+  case "${1:-}" in
+    "")
+      ;;
+    --force)
+      force="true"
+      shift
+      ;;
+    *)
+      fail "unknown option for init-config: $1"
+      ;;
+  esac
+
+  if [ "$#" -gt 0 ]; then
+    fail "unexpected arguments for init-config"
+  fi
+
+  path="$(config_path)"
+  dir="$(dirname "$path")"
+  mkdir -p "$dir"
+
+  if [ -e "$path" ] && [ "$force" != "true" ]; then
+    fail "config already exists at $path (use 'glance init-config --force' to overwrite)"
+  fi
+
+  write_starter_config "$path"
+  info "wrote starter config to $path"
+}
+
 # Resolve symlinks to find the actual script location
 SCRIPT="$0"
 while [ -L "$SCRIPT" ]; do
@@ -97,6 +169,16 @@ case "${1:-}" in
   -v|--version|version)
     echo "glance $(read_version)"
     exit 0
+    ;;
+  init-config)
+    shift
+    init_config "$@"
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    fail "unknown command or option: $1 (run 'glance --help')"
     ;;
 esac
 

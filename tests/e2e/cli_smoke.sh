@@ -15,6 +15,7 @@ grep -Fx -- "glance $VERSION" "$TMP_DIR/version.out" >/dev/null
 "$ROOT/bin/glance" --help >"$TMP_DIR/help.out"
 grep -Fx -- "glance - review git changes in a clean Neovim session" "$TMP_DIR/help.out" >/dev/null
 grep -Fx -- "  glance --help" "$TMP_DIR/help.out" >/dev/null
+grep -Fx -- "  glance init-config [--force]" "$TMP_DIR/help.out" >/dev/null
 grep -Fx -- "  - nvim 0.11+ on PATH" "$TMP_DIR/help.out" >/dev/null
 
 cd "$TMP_DIR"
@@ -24,6 +25,25 @@ if "$ROOT/bin/glance" >"$TMP_DIR/outside.out" 2>"$TMP_DIR/outside.err"; then
 fi
 
 grep -F "glance: not a git repository" "$TMP_DIR/outside.err" >/dev/null
+
+INIT_HOME="$TMP_DIR/init-home"
+mkdir -p "$INIT_HOME"
+HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config.out" 2>"$TMP_DIR/init-config.err"
+DEFAULT_CONFIG="$INIT_HOME/.config/glance/config.lua"
+[ -f "$DEFAULT_CONFIG" ]
+grep -F "glance: wrote starter config to $DEFAULT_CONFIG" "$TMP_DIR/init-config.err" >/dev/null
+grep -Fx -- "    preset = 'seti_black'," "$DEFAULT_CONFIG" >/dev/null
+
+if HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config-second.out" 2>"$TMP_DIR/init-config-second.err"; then
+  echo "expected init-config to fail when the config already exists" >&2
+  exit 1
+fi
+grep -F "glance: config already exists at $DEFAULT_CONFIG" "$TMP_DIR/init-config-second.err" >/dev/null
+
+CUSTOM_CONFIG="$TMP_DIR/custom/config.lua"
+GLANCE_CONFIG="$CUSTOM_CONFIG" "$ROOT/bin/glance" init-config --force >"$TMP_DIR/init-config-custom.out" 2>"$TMP_DIR/init-config-custom.err"
+[ -f "$CUSTOM_CONFIG" ]
+grep -F "glance: wrote starter config to $CUSTOM_CONFIG" "$TMP_DIR/init-config-custom.err" >/dev/null
 
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/clean-repo" "$TMP_DIR/dirty-repo"
 cat >"$TMP_DIR/bin/nvim" <<'EOF'
@@ -93,6 +113,12 @@ grep -F "glance: nvim 0.11+ is required, found 0.10.4" "$TMP_DIR/old-nvim.err" >
   fi
 )
 grep -F "glance: git is required but was not found on PATH" "$TMP_DIR/missing-git.err" >/dev/null
+
+if "$ROOT/bin/glance" nope >"$TMP_DIR/unknown.out" 2>"$TMP_DIR/unknown.err"; then
+  echo "expected unknown commands to fail" >&2
+  exit 1
+fi
+grep -F "glance: unknown command or option: nope (run 'glance --help')" "$TMP_DIR/unknown.err" >/dev/null
 
 (
   cd "$TMP_DIR/dirty-repo"
