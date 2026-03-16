@@ -9,6 +9,76 @@ read_version() {
   fi
 }
 
+usage() {
+  cat <<'EOF'
+glance - review git changes in a clean Neovim session
+
+Usage:
+  glance
+  glance --help
+  glance --version
+
+Requirements:
+  - git on PATH
+  - nvim 0.11+ on PATH
+
+Notes:
+  - Run glance inside a git repository.
+  - Set GLANCE_CONFIG to load a config file from a custom path.
+EOF
+}
+
+fail() {
+  echo "glance: $*" >&2
+  exit 1
+}
+
+info() {
+  echo "glance: $*" >&2
+}
+
+require_command() {
+  local command_name="$1"
+  local message="$2"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    fail "$message"
+  fi
+}
+
+require_supported_nvim() {
+  local first_line=""
+  local parsed=""
+  local major=""
+  local minor=""
+  local patch=""
+
+  require_command "nvim" "nvim 0.11+ is required but was not found on PATH"
+
+  first_line="$(nvim --version 2>/dev/null | sed -n '1p')"
+  parsed="$(printf '%s\n' "$first_line" | sed -nE 's/^NVIM v([0-9]+)\.([0-9]+)(\.([0-9]+))?.*/\1 \2 \4/p')"
+
+  if [ -z "$parsed" ]; then
+    fail "failed to determine Neovim version from: ${first_line:-<empty output>}"
+  fi
+
+  IFS=' ' read -r major minor patch <<EOF
+$parsed
+EOF
+  patch="${patch:-0}"
+
+  if [ "$major" -eq 0 ] && [ "$minor" -lt 11 ]; then
+    fail "nvim 0.11+ is required, found $major.$minor.$patch"
+  fi
+}
+
+repo_has_changes() {
+  local status_output=""
+
+  status_output="$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)" || return 1
+  [ -n "$status_output" ]
+}
+
 # Resolve symlinks to find the actual script location
 SCRIPT="$0"
 while [ -L "$SCRIPT" ]; do
@@ -20,17 +90,29 @@ GLANCE_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 export GLANCE_ROOT
 
 case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
   -v|--version|version)
     echo "glance $(read_version)"
     exit 0
     ;;
 esac
 
+require_command "git" "git is required but was not found on PATH"
+
 # Verify we're inside a git repository
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-  echo "glance: not a git repository" >&2
-  exit 1
+  fail "not a git repository"
 fi
+
+if ! repo_has_changes; then
+  info "no changes found"
+  exit 0
+fi
+
+require_supported_nvim
 
 # Launch neovim in minimal mode with only the glance plugin
 exec nvim --clean \

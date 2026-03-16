@@ -6,9 +6,16 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+BASH_BIN="$(command -v bash)"
+DIRNAME_BIN="$(command -v dirname)"
 
 "$ROOT/bin/glance" --version >"$TMP_DIR/version.out"
 grep -Fx -- "glance $VERSION" "$TMP_DIR/version.out" >/dev/null
+
+"$ROOT/bin/glance" --help >"$TMP_DIR/help.out"
+grep -Fx -- "glance - review git changes in a clean Neovim session" "$TMP_DIR/help.out" >/dev/null
+grep -Fx -- "  glance --help" "$TMP_DIR/help.out" >/dev/null
+grep -Fx -- "  - nvim 0.11+ on PATH" "$TMP_DIR/help.out" >/dev/null
 
 cd "$TMP_DIR"
 if "$ROOT/bin/glance" >"$TMP_DIR/outside.out" 2>"$TMP_DIR/outside.err"; then
@@ -18,26 +25,82 @@ fi
 
 grep -F "glance: not a git repository" "$TMP_DIR/outside.err" >/dev/null
 
-mkdir -p "$TMP_DIR/bin" "$TMP_DIR/repo"
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/clean-repo" "$TMP_DIR/dirty-repo"
 cat >"$TMP_DIR/bin/nvim" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "NVIM v0.11.6"
+  exit 0
+fi
+
 printf '%s\n' "$@" >"${GLANCE_CAPTURE:?}"
 printf '%s\n' "${GLANCE_ROOT:-}" >"${GLANCE_ROOT_CAPTURE:?}"
 exit 0
 EOF
 chmod +x "$TMP_DIR/bin/nvim"
 
+mkdir -p "$TMP_DIR/old-nvim-bin" "$TMP_DIR/no-git-bin"
+cat >"$TMP_DIR/old-nvim-bin/nvim" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "NVIM v0.10.4"
+  exit 0
+fi
+
+echo "unexpected nvim launch" >&2
+exit 1
+EOF
+chmod +x "$TMP_DIR/old-nvim-bin/nvim"
+ln -sf "$DIRNAME_BIN" "$TMP_DIR/no-git-bin/dirname"
+
 SPACED_ROOT="$TMP_DIR/root with space"
 mkdir -p "$SPACED_ROOT/bin"
 cp "$ROOT/bin/glance" "$SPACED_ROOT/bin/glance"
 
-git -C "$TMP_DIR/repo" init >/dev/null 2>&1
+git -C "$TMP_DIR/clean-repo" init >/dev/null 2>&1
+git -C "$TMP_DIR/dirty-repo" init >/dev/null 2>&1
+echo "pending" >"$TMP_DIR/dirty-repo/pending.txt"
+
 (
-  export PATH="$TMP_DIR/bin:$PATH"
-  export GLANCE_CAPTURE="$TMP_DIR/nvim.args"
-  export GLANCE_ROOT_CAPTURE="$TMP_DIR/glance-root.txt"
-  cd "$TMP_DIR/repo"
-  "$SPACED_ROOT/bin/glance"
+  cd "$TMP_DIR/clean-repo"
+  env PATH="/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/clean-repo.out" 2>"$TMP_DIR/clean-repo.err"
+)
+grep -F "glance: no changes found" "$TMP_DIR/clean-repo.err" >/dev/null
+
+(
+  cd "$TMP_DIR/dirty-repo"
+  if env PATH="/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/missing-nvim.out" 2>"$TMP_DIR/missing-nvim.err"; then
+    echo "expected bin/glance to fail when nvim is missing" >&2
+    exit 1
+  fi
+)
+grep -F "glance: nvim 0.11+ is required but was not found on PATH" "$TMP_DIR/missing-nvim.err" >/dev/null
+
+(
+  cd "$TMP_DIR/dirty-repo"
+  if env PATH="$TMP_DIR/old-nvim-bin:/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/old-nvim.out" 2>"$TMP_DIR/old-nvim.err"; then
+    echo "expected bin/glance to fail for unsupported nvim versions" >&2
+    exit 1
+  fi
+)
+grep -F "glance: nvim 0.11+ is required, found 0.10.4" "$TMP_DIR/old-nvim.err" >/dev/null
+
+(
+  cd "$TMP_DIR/dirty-repo"
+  if env PATH="$TMP_DIR/no-git-bin" "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/missing-git.out" 2>"$TMP_DIR/missing-git.err"; then
+    echo "expected bin/glance to fail when git is missing" >&2
+    exit 1
+  fi
+)
+grep -F "glance: git is required but was not found on PATH" "$TMP_DIR/missing-git.err" >/dev/null
+
+(
+  cd "$TMP_DIR/dirty-repo"
+  env \
+    PATH="$TMP_DIR/bin:$PATH" \
+    GLANCE_CAPTURE="$TMP_DIR/nvim.args" \
+    GLANCE_ROOT_CAPTURE="$TMP_DIR/glance-root.txt" \
+    "$SPACED_ROOT/bin/glance"
 )
 
 grep -Fx -- "--clean" "$TMP_DIR/nvim.args" >/dev/null
