@@ -186,6 +186,27 @@ return {
 }
 ```
 
+## Themes
+
+Glance ships with two built-in theme presets:
+
+- `seti_black`
+- `one_light`
+
+`seti_black` is the default. Switch presets with `theme.preset`, and layer `theme.palette` overrides on top when you want to tune individual colors.
+
+```lua
+return {
+  theme = {
+    preset = 'one_light',
+  },
+}
+```
+
+<div align="center">
+  <img src="assets/readme/dist/glance-themes.png" width="720" alt="Diagonal split comparison of the seti_black and one_light Glance theme presets">
+</div>
+
 <details>
 <summary><strong>Config reference</strong></summary>
 
