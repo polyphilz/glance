@@ -40,6 +40,25 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
    curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | bash
    ```
 
+   The installer creates `~/.local/bin/glance`. If `glance` is not found after install, run:
+
+   ```bash
+   case ":$PATH:" in
+     *":$HOME/.local/bin:"*) echo "~/.local/bin already on PATH" ;;
+     *)
+       case "${SHELL##*/}" in
+         zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
+         bash) rc="$HOME/.bashrc" ;;
+         *) rc="$HOME/.profile" ;;
+       esac
+       line='export PATH="$HOME/.local/bin:$PATH"'
+       grep -qxF "$line" "$rc" 2>/dev/null || printf '\n%s\n' "$line" >> "$rc"
+       export PATH="$HOME/.local/bin:$PATH"
+       echo "Added ~/.local/bin to PATH in $rc"
+       ;;
+   esac
+   ```
+
 3. Run it inside any Git repository:
 
    ```bash
