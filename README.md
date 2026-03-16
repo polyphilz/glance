@@ -10,6 +10,10 @@ Glance is a standalone app built on Neovim for reviewing git changes.
 <a href="https://www.lua.org/" target="_blank"><img src="https://img.shields.io/badge/Lua-2C2D72?style=flat&logo=lua&logoColor=white" alt="Lua"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 
+<br>
+
+<img src="assets/readme/dist/glance-demo.gif" width="720" alt="Animated demo of Glance reviewing git changes">
+
 </div>
 
 ## Quick Start
