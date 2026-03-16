@@ -1,6 +1,11 @@
-# Glance
+<div align="center">
+
+<img src="assets/readme/dist/glance-hero-stars.gif" width="1000" alt="Animated glance hero">
+<h1>glance</h1>
 
 Glance is a standalone app built on Neovim for reviewing git changes. It owns the Neovim session it starts.
+
+</div>
 
 ## Dependencies
 

@@ -1,0 +1,8 @@
+[project]
+name = "glance-readme-assets"
+version = "0.1.0"
+description = "Asset generation scripts for the Glance README hero"
+requires-python = ">=3.11"
+dependencies = [
+  "pillow>=11.2.1",
+]

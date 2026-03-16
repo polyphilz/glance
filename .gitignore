@@ -1,3 +1,6 @@
 **/.plans
 **/.nvimlog
-
+**/.DS_Store
+**/.pyc
+**/.venv/
+**/__pycache__/
