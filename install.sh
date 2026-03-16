@@ -12,6 +12,15 @@ set -euo pipefail
 GITHUB_REPO="${GLANCE_GITHUB_REPO:-polyphilz/glance}"
 TARGET_DIR="${HOME}/.local/bin"
 INSTALL_BASE="${HOME}/.local/share/glance"
+INSTALL_TMP_DIR=""
+
+cleanup_install_tmp_dir() {
+    if [ -n "${INSTALL_TMP_DIR:-}" ]; then
+        rm -rf -- "$INSTALL_TMP_DIR"
+    fi
+}
+
+trap cleanup_install_tmp_dir EXIT
 
 normalize_ref() {
     local ref="$1"
@@ -89,7 +98,7 @@ install_from_archive() {
     repo_ref="$(resolve_repo_ref)"
     archive_url="$(archive_url_for_ref "$repo_ref")"
     tmp_dir="$(mktemp -d)"
-    trap 'rm -rf "$tmp_dir"' EXIT
+    INSTALL_TMP_DIR="$tmp_dir"
 
     echo "Installing glance from ${repo_ref}..."
     if [ "$repo_ref" = "main" ] && [ -z "${GLANCE_REF:-}" ]; then
