@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+
 export HOME="$TMP_DIR/home"
 mkdir -p "$HOME"
 
@@ -25,3 +27,5 @@ if [ "$ACTUAL" != "$EXPECTED" ]; then
 fi
 
 grep -F "Installed glance -> $TARGET" "$TMP_DIR/install-second.out" >/dev/null
+"$TARGET" --version >"$TMP_DIR/version.out"
+grep -Fx -- "glance $VERSION" "$TMP_DIR/version.out" >/dev/null

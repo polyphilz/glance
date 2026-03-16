@@ -5,3 +5,4 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 "$ROOT/tests/e2e/cli_smoke.sh"
 "$ROOT/tests/e2e/install_smoke.sh"
+"$ROOT/tests/e2e/release_smoke.sh"

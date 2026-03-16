@@ -5,6 +5,11 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+
+"$ROOT/bin/glance" --version >"$TMP_DIR/version.out"
+grep -Fx -- "glance $VERSION" "$TMP_DIR/version.out" >/dev/null
+
 cd "$TMP_DIR"
 if "$ROOT/bin/glance" >"$TMP_DIR/outside.out" 2>"$TMP_DIR/outside.err"; then
   echo "expected bin/glance to fail outside a git repo" >&2

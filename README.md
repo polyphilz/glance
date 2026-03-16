@@ -1,13 +1,25 @@
 <div align="center">
 
 <img src="assets/readme/dist/glance-hero-stars.gif" width="820" alt="Animated glance hero">
-<h1>glance</h1>
 
-Glance is a standalone app built on Neovim for reviewing git changes. It owns the Neovim session it starts.
+Glance is a standalone app built on Neovim for reviewing git changes.
 
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 
 </div>
+
+## Quick Start
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | bash
+```
+
+The bootstrap installer resolves the latest GitHub release by default.
+
+- Pin a release: `curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | GLANCE_REF=v0.1.0 bash`
+- Install unreleased `main`: `curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | GLANCE_REF=main bash`
+- Install from a local checkout: `./install.sh`
+- Verify the installed version: `glance --version`
 
 ## Dependencies
 
@@ -17,12 +29,14 @@ Required to run Glance:
 - Neovim on your `PATH` as `nvim`. `0.11+` is the safe target for the current codebase.
 - Git on your `PATH` as `git`.
 - Bash plus standard Unix utilities used by the launcher/install flow: `readlink`, `ln`, and `mkdir`.
+- `curl`, `tar`, and `mktemp` if you use the bootstrap installer.
 
 Install notes:
 
-- `./install.sh` creates a symlink at `~/.local/bin/glance`.
+- The bootstrap installer downloads Glance into `~/.local/share/glance/<ref>` and creates a symlink at `~/.local/bin/glance`.
+- `./install.sh` from a local checkout creates a symlink at `~/.local/bin/glance` that points back to that checkout.
 - `~/.local/bin` needs to be on your `PATH`.
-- The install is symlink-based, so the cloned repo needs to stay in a stable location after installation.
+- Local checkout installs are symlink-based, so the cloned repo needs to stay in a stable location after installation.
 
 Optional:
 
@@ -99,6 +113,10 @@ In the file tree, `d` discards the selected file and `D` discards all repo chang
 - [x] Add a white theme preset
 - [x] Get "Discard all changes" and single "Discard changes" functionality working
 - [ ] Verify all the code
+
+## Releasing
+
+See [RELEASING.md](RELEASING.md) for the version bump and GitHub release flow.
 
 ## License
 

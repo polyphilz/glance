@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+read_version() {
+  if [ -f "$GLANCE_ROOT/VERSION" ]; then
+    tr -d '[:space:]' < "$GLANCE_ROOT/VERSION"
+  else
+    printf 'unknown'
+  fi
+}
+
 # Resolve symlinks to find the actual script location
 SCRIPT="$0"
 while [ -L "$SCRIPT" ]; do
@@ -10,6 +18,13 @@ while [ -L "$SCRIPT" ]; do
 done
 GLANCE_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 export GLANCE_ROOT
+
+case "${1:-}" in
+  -v|--version|version)
+    echo "glance $(read_version)"
+    exit 0
+    ;;
+esac
 
 # Verify we're inside a git repository
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
