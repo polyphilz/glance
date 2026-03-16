@@ -5,6 +5,8 @@
 
 Glance is a standalone app built on Neovim for reviewing git changes. It owns the Neovim session it starts.
 
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+
 </div>
 
 ## Dependencies
@@ -97,3 +99,7 @@ In the file tree, `d` discards the selected file and `D` discards all repo chang
 - [x] Add a white theme preset
 - [x] Get "Discard all changes" and single "Discard changes" functionality working
 - [ ] Verify all the code
+
+## License
+
+MIT
