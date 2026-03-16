@@ -399,6 +399,8 @@ end
 --- Open a file based on its classified git state.
 function M.open_file(file)
   local diffview = require('glance.diffview')
+  local git = require('glance.git')
+  local is_binary = git.ensure_file_binary(file)
   local kind = infer_kind(file)
 
   -- Close any existing diff first
@@ -409,7 +411,7 @@ function M.open_file(file)
   -- Close welcome pane to make room for diff
   M.close_welcome()
 
-  if file.is_binary then
+  if is_binary then
     diffview.open_placeholder(file, 'binary diff not supported yet')
   elseif kind == 'deleted' then
     diffview.open_deleted(file)

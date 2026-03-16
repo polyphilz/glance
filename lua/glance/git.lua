@@ -260,14 +260,7 @@ function M.get_changed_files()
     return empty_files()
   end
 
-  local files = M.build_file_sections(M.parse_porcelain_entries(output))
-  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
-    for _, file in ipairs(files[section]) do
-      file.is_binary = M.entry_is_binary(file)
-    end
-  end
-
-  return files
+  return M.build_file_sections(M.parse_porcelain_entries(output))
 end
 
 --- Retrieve file content at a specific git ref.
@@ -394,6 +387,23 @@ function M.entry_is_binary(file)
   return false
 end
 
+--- Resolve and memoize the binary state for a file entry when needed.
+--- @param file table|nil
+--- @return boolean
+function M.ensure_file_binary(file)
+  if type(file) ~= 'table' then
+    return false
+  end
+
+  if file.is_binary == true then
+    return true
+  end
+
+  local is_binary = M.entry_is_binary(file)
+  file.is_binary = is_binary
+  return is_binary
+end
+
 M.UNSUPPORTED_DISCARD_MESSAGE = 'glance: discard is not supported for this git state yet'
 
 local function infer_file_kind(file)
@@ -441,7 +451,7 @@ function M.can_discard_file(file)
     return false, 'invalid file target'
   end
 
-  if file.is_binary then
+  if M.ensure_file_binary(file) then
     return false, M.UNSUPPORTED_DISCARD_MESSAGE
   end
 

@@ -431,7 +431,7 @@ return {
       end,
     },
     {
-      name = 'integration handles newline stability and untracked binary detection',
+      name = 'integration handles newline stability and lazily resolves untracked binary state',
       run = function()
         N.with_repo('repo_binary', function(repo)
           local git = require('glance.git')
@@ -449,13 +449,13 @@ return {
               status = '?',
               display_status = '?',
               kind = 'untracked',
-              is_binary = true,
               x = '?',
               y = '?',
               raw_status = '??',
             }),
           })
-          A.truthy(git.entry_is_binary(changed.untracked[1]))
+          A.truthy(git.ensure_file_binary(changed.untracked[1]))
+          A.truthy(changed.untracked[1].is_binary)
           A.falsy(git.entry_is_binary({
             path = repo.files.tracked,
             section = 'changes',
@@ -465,7 +465,7 @@ return {
       end,
     },
     {
-      name = 'integration detects binary staged adds and unstaged binary modifications',
+      name = 'integration lazily resolves binary staged adds and unstaged binary modifications',
       run = function()
         local git = require('glance.git')
 
@@ -479,12 +479,12 @@ return {
               status = 'A',
               display_status = 'A',
               kind = 'added',
-              is_binary = true,
               x = 'A',
               y = ' ',
               raw_status = 'A ',
             }),
           })
+          A.truthy(git.ensure_file_binary(changed.staged[1]))
         end)
 
         N.with_repo('repo_binary_modified', function(repo)
@@ -497,12 +497,39 @@ return {
               status = 'M',
               display_status = 'M',
               kind = 'modified',
-              is_binary = true,
               x = ' ',
               y = 'M',
               raw_status = ' M',
             }),
           })
+          A.truthy(git.ensure_file_binary(changed.changes[1]))
+        end)
+      end,
+    },
+    {
+      name = 'integration get_changed_files avoids eager binary probes',
+      run = function()
+        N.with_repo('repo_binary_staged_add', function()
+          local git = require('glance.git')
+          local original = git.entry_is_binary
+          local calls = 0
+
+          git.entry_is_binary = function(...)
+            calls = calls + 1
+            return original(...)
+          end
+
+          local ok, err = xpcall(function()
+            local changed = git.get_changed_files()
+            A.equal(calls, 0)
+            A.falsy(changed.staged[1].is_binary)
+          end, debug.traceback)
+
+          git.entry_is_binary = original
+
+          if not ok then
+            error(err, 0)
+          end
         end)
       end,
     },
