@@ -29,20 +29,20 @@ grep -F "glance: not a git repository" "$TMP_DIR/outside.err" >/dev/null
 
 INIT_HOME="$TMP_DIR/init-home"
 mkdir -p "$INIT_HOME"
-HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config.out" 2>"$TMP_DIR/init-config.err"
+env -u GLANCE_CONFIG -u XDG_CONFIG_HOME HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config.out" 2>"$TMP_DIR/init-config.err"
 DEFAULT_CONFIG="$INIT_HOME/.config/glance/config.lua"
 [ -f "$DEFAULT_CONFIG" ]
 grep -F "glance: wrote starter config to $DEFAULT_CONFIG" "$TMP_DIR/init-config.err" >/dev/null
 grep -Fx -- "    preset = 'seti_black'," "$DEFAULT_CONFIG" >/dev/null
 
-if HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config-second.out" 2>"$TMP_DIR/init-config-second.err"; then
+if env -u GLANCE_CONFIG -u XDG_CONFIG_HOME HOME="$INIT_HOME" "$ROOT/bin/glance" init-config >"$TMP_DIR/init-config-second.out" 2>"$TMP_DIR/init-config-second.err"; then
   echo "expected init-config to fail when the config already exists" >&2
   exit 1
 fi
 grep -F "glance: config already exists at $DEFAULT_CONFIG" "$TMP_DIR/init-config-second.err" >/dev/null
 
 CUSTOM_CONFIG="$TMP_DIR/custom/config.lua"
-GLANCE_CONFIG="$CUSTOM_CONFIG" "$ROOT/bin/glance" init-config --force >"$TMP_DIR/init-config-custom.out" 2>"$TMP_DIR/init-config-custom.err"
+env -u XDG_CONFIG_HOME HOME="$INIT_HOME" GLANCE_CONFIG="$CUSTOM_CONFIG" "$ROOT/bin/glance" init-config --force >"$TMP_DIR/init-config-custom.out" 2>"$TMP_DIR/init-config-custom.err"
 [ -f "$CUSTOM_CONFIG" ]
 grep -F "glance: wrote starter config to $CUSTOM_CONFIG" "$TMP_DIR/init-config-custom.err" >/dev/null
 

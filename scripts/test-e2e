@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+echo "E2E  cli_smoke.sh"
 "$ROOT/tests/e2e/cli_smoke.sh"
+echo "E2E  install_smoke.sh"
 "$ROOT/tests/e2e/install_smoke.sh"
+echo "E2E  release_smoke.sh"
 "$ROOT/tests/e2e/release_smoke.sh"
