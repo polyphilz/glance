@@ -8,6 +8,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 BASH_BIN="$(command -v bash)"
 DIRNAME_BIN="$(command -v dirname)"
+GIT_BIN="$(command -v git)"
 
 "$ROOT/bin/glance" --version >"$TMP_DIR/version.out"
 grep -Fx -- "glance $VERSION" "$TMP_DIR/version.out" >/dev/null
@@ -59,7 +60,9 @@ exit 0
 EOF
 chmod +x "$TMP_DIR/bin/nvim"
 
-mkdir -p "$TMP_DIR/old-nvim-bin" "$TMP_DIR/no-git-bin"
+mkdir -p "$TMP_DIR/git-only-bin" "$TMP_DIR/old-nvim-bin" "$TMP_DIR/no-git-bin"
+ln -sf "$DIRNAME_BIN" "$TMP_DIR/git-only-bin/dirname"
+ln -sf "$GIT_BIN" "$TMP_DIR/git-only-bin/git"
 cat >"$TMP_DIR/old-nvim-bin/nvim" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then
@@ -71,6 +74,10 @@ echo "unexpected nvim launch" >&2
 exit 1
 EOF
 chmod +x "$TMP_DIR/old-nvim-bin/nvim"
+ln -sf "$DIRNAME_BIN" "$TMP_DIR/old-nvim-bin/dirname"
+ln -sf "$GIT_BIN" "$TMP_DIR/old-nvim-bin/git"
+ln -sf "$BASH_BIN" "$TMP_DIR/old-nvim-bin/bash"
+ln -sf "$(command -v sed)" "$TMP_DIR/old-nvim-bin/sed"
 ln -sf "$DIRNAME_BIN" "$TMP_DIR/no-git-bin/dirname"
 
 SPACED_ROOT="$TMP_DIR/root with space"
@@ -83,13 +90,13 @@ echo "pending" >"$TMP_DIR/dirty-repo/pending.txt"
 
 (
   cd "$TMP_DIR/clean-repo"
-  env PATH="/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/clean-repo.out" 2>"$TMP_DIR/clean-repo.err"
+  env PATH="$TMP_DIR/git-only-bin" "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/clean-repo.out" 2>"$TMP_DIR/clean-repo.err"
 )
 grep -F "glance: no changes found" "$TMP_DIR/clean-repo.err" >/dev/null
 
 (
   cd "$TMP_DIR/dirty-repo"
-  if env PATH="/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/missing-nvim.out" 2>"$TMP_DIR/missing-nvim.err"; then
+  if env PATH="$TMP_DIR/git-only-bin" "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/missing-nvim.out" 2>"$TMP_DIR/missing-nvim.err"; then
     echo "expected bin/glance to fail when nvim is missing" >&2
     exit 1
   fi
@@ -98,7 +105,7 @@ grep -F "glance: nvim 0.11+ is required but was not found on PATH" "$TMP_DIR/mis
 
 (
   cd "$TMP_DIR/dirty-repo"
-  if env PATH="$TMP_DIR/old-nvim-bin:/usr/bin:/bin" "$ROOT/bin/glance" >"$TMP_DIR/old-nvim.out" 2>"$TMP_DIR/old-nvim.err"; then
+  if env PATH="$TMP_DIR/old-nvim-bin" "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/old-nvim.out" 2>"$TMP_DIR/old-nvim.err"; then
     echo "expected bin/glance to fail for unsupported nvim versions" >&2
     exit 1
   fi
