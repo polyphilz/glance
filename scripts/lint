@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+cd "$ROOT"
+
+shell_files=()
+while IFS= read -r file; do
+  shell_files+=("$file")
+done < <(git ls-files -- '*.sh' 'bin/*' 'scripts/*' | sort -u)
+
+if [ "${#shell_files[@]}" -eq 0 ]; then
+  echo "No shell files found."
+  exit 0
+fi
+
+for file in "${shell_files[@]}"; do
+  bash -n "$file"
+done
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "shellcheck not found. Install shellcheck to run scripts/lint." >&2
+  exit 1
+fi
+
+shellcheck "${shell_files[@]}"

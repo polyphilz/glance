@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run lint checks
+        run: ./scripts/lint
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Neovim on Linux
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz -o /tmp/nvim.tar.gz
+          tar -xzf /tmp/nvim.tar.gz -C /tmp
+          echo "/tmp/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Install Neovim on macOS
+        if: runner.os == 'macOS'
+        run: brew install neovim
+
+      - name: Verify Neovim version
+        run: nvim --version | sed -n '1p'
+
+      - name: Run test suite
+        run: ./scripts/test
