@@ -3,7 +3,6 @@ local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 local FILETREE_NS = vim.api.nvim_create_namespace('glance_filetree')
-local LEGEND_LINE_COUNT = 3
 
 -- State
 M.buf = nil
@@ -16,6 +15,10 @@ M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snappi
 
 local function filetree_options()
   return config.options.windows.filetree
+end
+
+local function filetree_config()
+  return config.options.filetree
 end
 
 local function apply_window_options(win)
@@ -53,6 +56,13 @@ local function add_highlight(highlights, line, col_start, col_end, group)
   highlights[#highlights + 1] = { line, col_start, col_end, group }
 end
 
+local function legend_line_count()
+  if filetree_config().show_legend then
+    return 4
+  end
+  return 0
+end
+
 local function snap_to_nearest_file(line, prefer_up)
   local total = vim.api.nvim_buf_line_count(M.buf)
 
@@ -85,9 +95,11 @@ local function add_legend(lines, highlights)
   local km = config.options.keymaps
   local title = '  discard'
   local actions = '  [' .. km.discard_file .. '] file   [' .. km.discard_all .. '] all'
+  local resize_hint = '  drag divider to resize'
 
   lines[#lines + 1] = title
   lines[#lines + 1] = actions
+  lines[#lines + 1] = resize_hint
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
@@ -98,6 +110,7 @@ local function add_legend(lines, highlights)
   add_highlight(highlights, 2, 13, 14, 'GlanceLegendBracket')
   add_highlight(highlights, 2, 14, 15, 'GlanceLegendKey')
   add_highlight(highlights, 2, 15, 16, 'GlanceLegendBracket')
+  add_highlight(highlights, 3, 0, #resize_hint, 'GlanceLegendHint')
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -145,7 +158,9 @@ function M.render(files)
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
-  add_legend(lines, highlights)
+  if filetree_config().show_legend then
+    add_legend(lines, highlights)
+  end
 
   local function add_section(title, file_list)
     if #file_list == 0 then
@@ -153,7 +168,7 @@ function M.render(files)
     end
 
     -- Blank line before section (except at the very start)
-    if #lines > LEGEND_LINE_COUNT then
+    if #lines > legend_line_count() then
       table.insert(lines, '')
       -- line_map entry is nil by default (no action needed)
     end
@@ -184,7 +199,7 @@ function M.render(files)
   add_section('Untracked', files.untracked)
 
   -- Handle empty state
-  if #lines == LEGEND_LINE_COUNT then
+  if #lines == legend_line_count() then
     lines[#lines + 1] = '  No changes found'
     add_highlight(highlights, #lines, 0, 20, 'Comment')
   end

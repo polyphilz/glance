@@ -12,6 +12,7 @@ local ALLOWED_TOP_LEVEL = {
   app = true,
   theme = true,
   windows = true,
+  filetree = true,
   keymaps = true,
   pane_navigation = true,
   hunk_navigation = true,
@@ -58,6 +59,7 @@ local ALLOWED_THEME_PALETTE = {
   minimap_cursor = true,
   statusline_bg = true,
   split = true,
+  split_hover = true,
   deleted_old = true,
   deleted_old_text = true,
   added_new = true,
@@ -73,6 +75,10 @@ local ALLOWED_WINDOWS = {
   filetree = true,
   diff = true,
   welcome = true,
+}
+
+local ALLOWED_FILETREE = {
+  show_legend = true,
 }
 
 local ALLOWED_FILETREE_WINDOW = {
@@ -188,6 +194,9 @@ local BASE_DEFAULTS = {
       signcolumn = 'no',
       cursorline = false,
     },
+  },
+  filetree = {
+    show_legend = true,
   },
   keymaps = {
     open_file = '<CR>',
@@ -353,6 +362,12 @@ local function validate_windows(options)
   validate_window_options('windows.welcome', windows.welcome, ALLOWED_WELCOME_WINDOW)
 end
 
+local function validate_filetree(options)
+  local filetree = options.filetree
+  validate_known_keys(filetree, ALLOWED_FILETREE, 'filetree')
+  validate_boolean(filetree.show_legend, 'filetree.show_legend')
+end
+
 local function validate_keymaps(options)
   local keymaps = options.keymaps
   validate_known_keys(keymaps, ALLOWED_KEYMAPS, 'keymaps')
@@ -461,6 +476,7 @@ local function validate_options(options)
   validate_app(options)
   validate_theme(options)
   validate_windows(options)
+  validate_filetree(options)
   validate_keymaps(options)
   validate_pane_navigation(options)
   validate_hunk_navigation(options)

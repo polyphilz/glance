@@ -3,6 +3,7 @@ local filetree = require('glance.filetree')
 local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
+local SEPARATOR_HL = 'GlanceSeparatorHover'
 
 local ns = vim.api.nvim_create_namespace('glance_welcome')
 local LOGO_TEXT = 'glance'
@@ -26,6 +27,7 @@ M.welcome_timer = nil
 M.animation_tick = 0
 M.starfield = nil
 M.starfield_key = nil
+M.separator_hover_win = nil
 
 local function hex_to_rgb(color)
   return tonumber(color:sub(2, 3), 16), tonumber(color:sub(4, 5), 16), tonumber(color:sub(6, 7), 16)
@@ -83,6 +85,107 @@ local function apply_window_options(win, options)
   if options.winfixwidth ~= nil then
     vim.api.nvim_win_set_option(win, 'winfixwidth', options.winfixwidth)
   end
+end
+
+local function hoverable_separator_windows()
+  local diffview = require('glance.diffview')
+  local wins = {}
+
+  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
+    wins[filetree.win] = true
+  end
+  if diffview.old_win and vim.api.nvim_win_is_valid(diffview.old_win) then
+    wins[diffview.old_win] = true
+  end
+
+  return wins
+end
+
+local function encode_winhighlight(items)
+  local encoded = {}
+  local keys = vim.tbl_keys(items)
+  table.sort(keys)
+
+  for _, key in ipairs(keys) do
+    encoded[#encoded + 1] = key .. ':' .. items[key]
+  end
+
+  return table.concat(encoded, ',')
+end
+
+local function apply_separator_hover(win, active)
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
+  local current = vim.api.nvim_get_option_value('winhighlight', { win = win })
+  local parsed = {}
+
+  for part in current:gmatch('[^,]+') do
+    local from, to = part:match('([^:]+):(.+)')
+    if from and to then
+      parsed[from] = to
+    end
+  end
+
+  if active then
+    parsed.WinSeparator = SEPARATOR_HL
+  elseif parsed.WinSeparator == SEPARATOR_HL then
+    parsed.WinSeparator = nil
+  end
+
+  vim.api.nvim_win_set_option(win, 'winhighlight', encode_winhighlight(parsed))
+end
+
+function M.clear_separator_hover()
+  if M.separator_hover_win and vim.api.nvim_win_is_valid(M.separator_hover_win) then
+    apply_separator_hover(M.separator_hover_win, false)
+  end
+  M.separator_hover_win = nil
+end
+
+local function hovered_separator_win(mouse)
+  if type(mouse) ~= 'table' or mouse.winid == 0 or mouse.line ~= 0 or mouse.column ~= 0 then
+    return nil
+  end
+
+  if not hoverable_separator_windows()[mouse.winid] then
+    return nil
+  end
+
+  local pos = vim.fn.win_screenpos(mouse.winid)
+  local top = pos[1]
+  local left = pos[2]
+  if top == nil or left == nil or top <= 0 or left <= 0 then
+    return nil
+  end
+
+  local right_separator = left + vim.api.nvim_win_get_width(mouse.winid)
+  if mouse.screencol ~= right_separator then
+    return nil
+  end
+
+  return mouse.winid
+end
+
+function M.update_separator_hover(mouse)
+  local win = hovered_separator_win(mouse or vim.fn.getmousepos())
+  if win == M.separator_hover_win then
+    return
+  end
+
+  M.clear_separator_hover()
+  if win then
+    apply_separator_hover(win, true)
+    M.separator_hover_win = win
+  end
+end
+
+function M.setup_separator_hover()
+  vim.opt.mousemoveevent = true
+  vim.keymap.set('n', '<MouseMove>', function()
+    M.update_separator_hover()
+  end, { silent = true })
 end
 
 local function fract(value)
@@ -308,10 +411,12 @@ function M.show_welcome()
 
   -- Focus back on filetree
   vim.api.nvim_set_current_win(filetree.win)
+  M.update_separator_hover()
 end
 
 --- Close the welcome pane.
 function M.close_welcome()
+  M.clear_separator_hover()
   stop_welcome_animation()
   M.animation_tick = 0
   M.starfield = nil
@@ -342,6 +447,7 @@ function M.setup_layout()
   local tree = filetree_options()
   apply_window_options(win, tree)
   vim.api.nvim_win_set_width(win, tree.width)
+  M.setup_separator_hover()
 
   -- Show welcome pane
   M.show_welcome()
@@ -431,6 +537,7 @@ function M.open_file(file)
 
   M.diff_open = true
   filetree.highlight_active(file)
+  M.update_separator_hover()
 end
 
 --- Close diff panes and restore the file tree + welcome pane.
@@ -453,6 +560,7 @@ function M.close_diff()
 
   -- Refresh the file tree to reflect any changes from editing
   filetree.refresh()
+  M.update_separator_hover()
 end
 
 return M

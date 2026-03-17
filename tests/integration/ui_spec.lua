@@ -47,6 +47,49 @@ return {
       end,
     },
     {
+      name = 'hover highlighting marks Glance separators and preserves diff winhighlight',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          local filetree_pos = vim.fn.win_screenpos(filetree.win)
+          ui.update_separator_hover({
+            winid = filetree.win,
+            line = 0,
+            column = 0,
+            screenrow = filetree_pos[1],
+            screencol = filetree_pos[2] + vim.api.nvim_win_get_width(filetree.win),
+          })
+
+          A.match(vim.api.nvim_get_option_value('winhighlight', { win = filetree.win }), 'WinSeparator:GlanceSeparatorHover')
+
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+          local diff_pos = vim.fn.win_screenpos(diffview.old_win)
+          ui.update_separator_hover({
+            winid = diffview.old_win,
+            line = 0,
+            column = 0,
+            screenrow = diff_pos[1],
+            screencol = diff_pos[2] + vim.api.nvim_win_get_width(diffview.old_win),
+          })
+
+          local winhl = vim.api.nvim_get_option_value('winhighlight', { win = diffview.old_win })
+          A.contains(winhl, 'DiffChange:GlanceDiffChangeOld')
+          A.contains(winhl, 'DiffText:GlanceDiffTextOld')
+          A.contains(winhl, 'WinSeparator:GlanceSeparatorHover')
+
+          ui.clear_separator_hover()
+          winhl = vim.api.nvim_get_option_value('winhighlight', { win = diffview.old_win })
+          A.contains(winhl, 'DiffChange:GlanceDiffChangeOld')
+          A.contains(winhl, 'DiffText:GlanceDiffTextOld')
+          A.falsy(winhl:find('WinSeparator:GlanceSeparatorHover', 1, true))
+        end)
+      end,
+    },
+    {
       name = 'opening a file closes welcome and routes to the correct diff opener',
       run = function()
         N.with_repo('repo_modified', function()

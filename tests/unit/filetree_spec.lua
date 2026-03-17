@@ -31,6 +31,7 @@ return {
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
           '  discard',
           '  [d] file   [D] all',
+          '  drag divider to resize',
           '',
           '  Staged Changes',
           '    M staged.txt',
@@ -41,7 +42,7 @@ return {
           '  Untracked',
           '    ? new.txt',
         })
-        A.equal(filetree.selected_line, 5)
+        A.equal(filetree.selected_line, 6)
       end,
     },
     {
@@ -60,6 +61,7 @@ return {
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
           '  discard',
           '  [d] file   [D] all',
+          '  drag divider to resize',
           '',
           '  Conflicts',
           '    U conflict.txt',
@@ -67,7 +69,7 @@ return {
           '  Changes',
           '    T typed.txt',
         })
-        A.equal(filetree.selected_line, 5)
+        A.equal(filetree.selected_line, 6)
       end,
     },
     {
@@ -87,7 +89,7 @@ return {
           untracked = {},
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    R old/path.txt → new/path.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[6], '    R old/path.txt → new/path.txt')
       end,
     },
     {
@@ -111,8 +113,8 @@ return {
           },
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[5], '    ! conflict.txt')
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    > copied.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[6], '    ! conflict.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[9], '    > copied.txt')
       end,
     },
     {
@@ -128,10 +130,35 @@ return {
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
           '  discard',
           '  [d] file   [D] all',
+          '  drag divider to resize',
           '',
           '  No changes found',
         })
         A.equal(filetree.get_selected_file(), nil)
+      end,
+    },
+    {
+      name = 'render can hide the legend via config',
+      run = function()
+        local config = require('glance.config')
+        config.setup({
+          filetree = {
+            show_legend = false,
+          },
+        })
+
+        local filetree = setup_filetree()
+        filetree.render({
+          changes = {
+            { path = 'changed.txt', status = 'D', section = 'changes' },
+          },
+        })
+
+        A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  Changes',
+          '    D changed.txt',
+        })
+        A.equal(filetree.selected_line, 2)
       end,
     },
     {

@@ -114,6 +114,10 @@ return {
     enabled = true,
     width = 1,
   },
+  -- Hide the filetree legend if you want to reclaim a few rows.
+  -- filetree = {
+  --   show_legend = false,
+  -- },
   -- Optional pane navigation aliases. Neovim's built-in <C-w> window
   -- commands still work without any config. If your terminal or tmux
   -- reports Ctrl-h/j/k/l as arrows, use the arrow-key tokens here.

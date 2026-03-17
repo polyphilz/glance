@@ -41,6 +41,7 @@ return {
               minimap_cursor = '#C8C8C8',
               statusline_bg = '#101010',
               split = '#333333',
+              split_hover = '#FD971F',
               deleted_old = '#3d1a1a',
               deleted_old_text = '#6b2c2c',
               added_new = '#1a3d1a',
@@ -74,6 +75,9 @@ return {
               signcolumn = 'no',
               cursorline = false,
             },
+          },
+          filetree = {
+            show_legend = true,
           },
           keymaps = {
             open_file = '<CR>',
@@ -131,6 +135,9 @@ return {
               relativenumber = false,
             },
           },
+          filetree = {
+            show_legend = false,
+          },
           theme = {
             preset = 'one_light',
             palette = {
@@ -155,6 +162,7 @@ return {
         A.equal(config.options.app.hide_statusline, true)
         A.equal(config.options.windows.filetree.width, 42)
         A.equal(config.options.windows.filetree.cursorline, true)
+        A.equal(config.options.filetree.show_legend, false)
         A.equal(config.options.windows.diff.relativenumber, false)
         A.equal(config.options.theme.preset, 'one_light')
         A.equal(config.options.theme.palette.logo, '#ffffff')
@@ -189,6 +197,7 @@ return {
         A.equal(config.options.theme.palette.statusline_bg, '#EAEAEB')
         A.equal(config.options.theme.palette.logo, '#526FFF')
         A.equal(config.options.theme.palette.minimap_cursor, '#111111')
+        A.equal(config.options.theme.palette.split_hover, '#526FFF')
         A.equal(config.options.theme.palette.deleted_old, '#F4CCC8')
         A.equal(config.options.theme.palette.added_new, '#CAE1CA')
       end,
@@ -222,6 +231,22 @@ return {
 
         A.falsy(ok)
         A.match(err, 'unknown config key config%.hide_statusline')
+      end,
+    },
+    {
+      name = 'invalid filetree options are rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            filetree = {
+              show_legend = 'nope',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'filetree%.show_legend must be a boolean')
       end,
     },
     {

@@ -185,6 +185,9 @@ return {
       relativenumber = false,
     },
   },
+  filetree = {
+    show_legend = false,
+  },
 }
 ```
 
@@ -238,6 +241,7 @@ Available top-level config domains:
 - `app`
 - `theme`
 - `windows`
+- `filetree`
 - `keymaps`
 - `pane_navigation`
 - `hunk_navigation`

@@ -12,7 +12,7 @@ return {
           local filetree = require('glance.filetree')
           local selected = filetree.get_selected_file()
           local keymaps = vim.api.nvim_buf_get_keymap(filetree.buf, 'n')
-          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 2, false)
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 3, false)
           local saw_discard = false
           local saw_discard_all = false
 
@@ -32,8 +32,9 @@ return {
           A.same(lines, {
             '  discard',
             '  [d] file   [D] all',
+            '  drag divider to resize',
           })
-          A.equal(filetree.selected_line, 5)
+          A.equal(filetree.selected_line, 6)
           A.equal(selected.path, repo.files.tracked)
         end)
       end,
@@ -50,19 +51,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 5)
+          A.equal(filetree.selected_line, 6)
           N.press('j')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           N.press('j')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
           N.press('k')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           N.press('K')
-          A.equal(filetree.selected_line, 5)
+          A.equal(filetree.selected_line, 6)
           N.press('J')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           N.press('2j')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
         end)
       end,
     },
@@ -78,19 +79,40 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 5)
+          A.equal(filetree.selected_line, 6)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 5)
+          A.equal(filetree.selected_line, 6)
+        end)
+      end,
+    },
+    {
+      name = 'legend can be hidden to reclaim filetree space',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').setup({
+            filetree = {
+              show_legend = false,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 2, false)
+
+          A.same(lines, {
+            '  Changes',
+            '    M tracked.txt',
+          })
+          A.equal(filetree.selected_line, 2)
         end)
       end,
     },

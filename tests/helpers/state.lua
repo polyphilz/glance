@@ -76,6 +76,7 @@ function M.reset()
     filetree.line_map = {}
     filetree.active_file = nil
     filetree.selected_line = nil
+    filetree.last_cursor_line = nil
   end
 
   if minimap then
@@ -105,6 +106,7 @@ function M.reset()
     ui.animation_tick = 0
     ui.starfield = nil
     ui.starfield_key = nil
+    ui.separator_hover_win = nil
   end
 
   reset_loaded_modules()
