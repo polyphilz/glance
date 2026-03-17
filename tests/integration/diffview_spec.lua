@@ -266,6 +266,53 @@ return {
       end,
     },
     {
+      name = 'configured pane navigation aliases move focus across Glance panes',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').setup({
+            app = {},
+            pane_navigation = {
+              left = 'H',
+              right = 'L',
+            },
+          })
+          require('glance').start()
+
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+
+          local keymaps = vim.api.nvim_buf_get_keymap(diffview.new_buf, 'n')
+          local has_left = false
+          local has_right = false
+          for _, map in ipairs(keymaps) do
+            if map.lhs == 'H' then
+              has_left = true
+            elseif map.lhs == 'L' then
+              has_right = true
+            end
+          end
+
+          vim.api.nvim_set_current_win(diffview.new_win)
+          N.press('H')
+          A.equal(vim.api.nvim_get_current_win(), diffview.old_win)
+
+          N.press('H')
+          A.equal(vim.api.nvim_get_current_win(), filetree.win)
+
+          N.press('L')
+          A.equal(vim.api.nvim_get_current_win(), diffview.old_win)
+
+          N.press('L')
+          A.equal(vim.api.nvim_get_current_win(), diffview.new_win)
+
+          A.truthy(has_left)
+          A.truthy(has_right)
+        end)
+      end,
+    },
+    {
       name = 'diff window options and watch lifecycle follow config',
       run = function()
         N.with_repo('repo_modified', function()

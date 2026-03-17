@@ -13,6 +13,7 @@ local ALLOWED_TOP_LEVEL = {
   theme = true,
   windows = true,
   keymaps = true,
+  pane_navigation = true,
   hunk_navigation = true,
   signs = true,
   welcome = true,
@@ -109,6 +110,13 @@ local ALLOWED_KEYMAPS = {
   discard_all = true,
 }
 
+local ALLOWED_PANE_NAVIGATION = {
+  left = true,
+  down = true,
+  up = true,
+  right = true,
+}
+
 local ALLOWED_HUNK_NAVIGATION = {
   next = true,
   prev = true,
@@ -191,6 +199,7 @@ local BASE_DEFAULTS = {
     discard_file = 'd',
     discard_all = 'D',
   },
+  pane_navigation = {},
   hunk_navigation = {},
   signs = {
     modified = 'M',
@@ -355,6 +364,38 @@ local function validate_keymaps(options)
   end
 end
 
+local function validate_pane_navigation(options)
+  local pane = options.pane_navigation or {}
+  local seen = {}
+
+  validate_known_keys(pane, ALLOWED_PANE_NAVIGATION, 'pane_navigation')
+
+  for key, value in pairs(pane) do
+    if type(value) ~= 'string' then
+      fail('pane_navigation.' .. key .. ' must be a string or nil')
+    end
+
+    if seen[value] then
+      fail('pane_navigation.' .. key .. ' conflicts with pane_navigation.' .. seen[value])
+    end
+    seen[value] = key
+  end
+
+  for direction, lhs in pairs(pane) do
+    for key, value in pairs(options.keymaps or {}) do
+      if value == lhs then
+        fail('pane_navigation.' .. direction .. ' conflicts with keymaps.' .. key)
+      end
+    end
+
+    for key, value in pairs(options.hunk_navigation or {}) do
+      if value == lhs then
+        fail('pane_navigation.' .. direction .. ' conflicts with hunk_navigation.' .. key)
+      end
+    end
+  end
+end
+
 local function validate_hunk_navigation(options)
   local hunk = options.hunk_navigation or {}
   local next_key = hunk.next
@@ -421,6 +462,7 @@ local function validate_options(options)
   validate_theme(options)
   validate_windows(options)
   validate_keymaps(options)
+  validate_pane_navigation(options)
   validate_hunk_navigation(options)
   validate_signs(options)
   validate_welcome(options)

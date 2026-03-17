@@ -85,6 +85,7 @@ return {
             discard_file = 'd',
             discard_all = 'D',
           },
+          pane_navigation = {},
           hunk_navigation = {},
           signs = {
             modified = 'M',
@@ -139,6 +140,9 @@ return {
           hunk_navigation = {
             next = 'N',
           },
+          pane_navigation = {
+            left = 'H',
+          },
           keymaps = {
             quit = 'x',
             discard_file = 'x',
@@ -159,6 +163,8 @@ return {
         A.equal(config.options.theme.palette.minimap_cursor, '#111111')
         A.equal(config.options.hunk_navigation.next, 'N')
         A.equal(config.options.hunk_navigation.prev, nil)
+        A.equal(config.options.pane_navigation.left, 'H')
+        A.equal(config.options.pane_navigation.right, nil)
         A.equal(config.options.keymaps.quit, 'x')
         A.equal(config.options.keymaps.open_file, '<CR>')
         A.equal(config.options.keymaps.discard_file, 'x')
@@ -268,6 +274,61 @@ return {
 
         A.falsy(ok)
         A.match(err, 'unknown theme preset banana')
+      end,
+    },
+    {
+      name = 'duplicate pane navigation keys are rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            pane_navigation = {
+              left = 'H',
+              right = 'H',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'pane_navigation%.right conflicts with pane_navigation%.left')
+      end,
+    },
+    {
+      name = 'pane navigation keys cannot reuse other Glance mappings',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            keymaps = {
+              toggle_filetree = '<Tab>',
+            },
+            pane_navigation = {
+              right = '<Tab>',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'pane_navigation%.right conflicts with keymaps%.toggle_filetree')
+      end,
+    },
+    {
+      name = 'pane navigation keys cannot reuse hunk navigation mappings',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            hunk_navigation = {
+              next = 'N',
+            },
+            pane_navigation = {
+              left = 'N',
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'pane_navigation%.left conflicts with hunk_navigation%.next')
       end,
     },
     {

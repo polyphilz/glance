@@ -1,6 +1,7 @@
 local git = require('glance.git')
 local config = require('glance.config')
 local filetree = require('glance.filetree')
+local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 
@@ -388,6 +389,7 @@ function M.bind_buffer_keymaps()
   local hunk = config.options.hunk_navigation or {}
 
   for _, buf in ipairs(collect_view_buffers()) do
+    pane_navigation.bind(buf)
     set_buffer_keymap(buf, km.toggle_filetree, function()
       filetree.toggle()
     end)

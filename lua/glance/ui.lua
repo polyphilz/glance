@@ -1,5 +1,6 @@
 local config = require('glance.config')
 local filetree = require('glance.filetree')
+local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 
@@ -261,6 +262,7 @@ function M.show_welcome()
   if M.welcome_win and vim.api.nvim_win_is_valid(M.welcome_win) then return end
 
   M.welcome_buf = create_welcome_buf()
+  pane_navigation.bind(M.welcome_buf)
 
   vim.api.nvim_set_current_win(filetree.win)
   vim.cmd('rightbelow vnew')

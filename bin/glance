@@ -114,6 +114,20 @@ return {
     enabled = true,
     width = 1,
   },
+  -- Optional pane navigation aliases. Neovim's built-in <C-w> window
+  -- commands still work without any config. If your terminal or tmux
+  -- reports Ctrl-h/j/k/l as arrows, use the arrow-key tokens here.
+  -- pane_navigation = {
+  --   left = '<Left>',
+  --   down = '<Down>',
+  --   up = '<Up>',
+  --   right = '<Right>',
+  -- },
+  -- Optional diff hunk navigation aliases.
+  -- hunk_navigation = {
+  --   next = 'n',
+  --   prev = 'N',
+  -- },
 }
 EOF
 }

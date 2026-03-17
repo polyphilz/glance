@@ -1,4 +1,5 @@
 local config = require('glance.config')
+local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 local FILETREE_NS = vim.api.nvim_create_namespace('glance_filetree')
@@ -79,6 +80,7 @@ function M.create_buf()
   vim.api.nvim_buf_set_name(buf, 'glance://files')
   M.buf = buf
   M.setup_keymaps()
+  pane_navigation.bind(buf)
 
   -- Snap cursor to nearest file entry whenever it lands on a header/blank
   vim.api.nvim_create_autocmd('CursorMoved', {

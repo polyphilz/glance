@@ -144,6 +144,8 @@ Default keys:
 | `d` | Discard the selected file after confirmation |
 | `D` | Discard all repo changes after confirmation |
 
+Pane navigation uses Neovim's built-in window commands by default, so `<C-w><Left>`, `<C-w><Right>`, `<C-w><Up>`, and `<C-w><Down>` work in Glance, along with `<C-w>h/j/k/l`.
+
 ## Configuration
 
 Glance loads an optional Lua config file automatically. The most common location is `~/.config/glance/config.lua`, or you can point `GLANCE_CONFIG` at a custom file.
@@ -186,6 +188,21 @@ return {
 }
 ```
 
+Add custom pane-navigation aliases if you want alternatives to Neovim's built-in `<C-w>` window commands. If your terminal or `tmux` reports those keys as arrows, use the tokens Neovim actually sees:
+
+```lua
+return {
+  pane_navigation = {
+    left = '<Left>',
+    down = '<Down>',
+    up = '<Up>',
+    right = '<Right>',
+  },
+}
+```
+
+These are extra aliases. Glance does not disable Neovim's built-in `<C-w>` window navigation.
+
 ## Themes
 
 Glance ships with two built-in theme presets:
@@ -222,6 +239,7 @@ Available top-level config domains:
 - `theme`
 - `windows`
 - `keymaps`
+- `pane_navigation`
 - `hunk_navigation`
 - `signs`
 - `welcome`
