@@ -12,6 +12,18 @@ M.line_map = {}      -- Maps buffer line number -> file object (nil for headers/
 M.active_file = nil  -- Currently viewed file in diff mode
 M.selected_line = nil -- Tracks the cursor line set by j/k/J/K navigation
 M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snapping
+M.repo_watchers = {}
+M.repo_watch_signature = nil
+M.repo_refresh_pending = false
+M.repo_refresh_inflight = false
+M.repo_refresh_generation = 0
+M.repo_refresh_options = nil
+M.repo_head_oid = nil
+M.repo_snapshot_key = ''
+M.repo_status_output = ''
+M.repo_poll_timer = nil
+M.repo_poll_backoff_index = 1
+M.repo_poll_delay_ms = nil
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -19,6 +31,10 @@ end
 
 local function filetree_config()
   return config.options.filetree
+end
+
+local function watch_options()
+  return config.options.watch
 end
 
 local function apply_window_options(win)
@@ -61,6 +77,217 @@ local function legend_line_count()
     return 4
   end
   return 0
+end
+
+local function close_handle(handle)
+  if not handle then
+    return
+  end
+
+  pcall(function()
+    handle:stop()
+  end)
+  pcall(function()
+    handle:close()
+  end)
+end
+
+local function files_empty(files)
+  files = files or {}
+  return #(files.conflicts or {}) == 0
+    and #(files.staged or {}) == 0
+    and #(files.changes or {}) == 0
+    and #(files.untracked or {}) == 0
+end
+
+local function same_file_identity(left, right)
+  return type(left) == 'table'
+    and type(right) == 'table'
+    and left.path == right.path
+    and left.old_path == right.old_path
+    and left.section == right.section
+    and left.raw_status == right.raw_status
+end
+
+local function find_matching_file(files, target)
+  if type(target) ~= 'table' then
+    return nil
+  end
+
+  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
+    for _, file in ipairs((files and files[section]) or {}) do
+      if same_file_identity(file, target) then
+        return file
+      end
+    end
+  end
+
+  return nil
+end
+
+local function restore_selection(saved_line)
+  if not saved_line or not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return
+  end
+
+  local line_count = vim.api.nvim_buf_line_count(M.buf)
+  if line_count == 0 then
+    M.selected_line = nil
+    return
+  end
+
+  local target_line = math.min(saved_line, line_count)
+  M.selected_line = target_line
+  vim.api.nvim_win_set_cursor(M.win, { target_line, 4 })
+  if M.line_map[target_line] then
+    return
+  end
+
+  M.move_down()
+  if not M.get_selected_file() then
+    M.move_up()
+  end
+  if not M.get_selected_file() then
+    M.selected_line = nil
+  end
+end
+
+local function new_buffer_is_modified()
+  local diffview = require('glance.diffview')
+  if not diffview.new_buf or not vim.api.nvim_buf_is_valid(diffview.new_buf) then
+    return false
+  end
+
+  if vim.api.nvim_buf_get_option(diffview.new_buf, 'buftype') ~= '' then
+    return false
+  end
+
+  return vim.api.nvim_buf_get_option(diffview.new_buf, 'modified')
+end
+
+local function stop_repo_poll()
+  if M.repo_poll_timer then
+    pcall(function()
+      M.repo_poll_timer:stop()
+    end)
+    pcall(function()
+      M.repo_poll_timer:close()
+    end)
+    M.repo_poll_timer = nil
+  end
+  M.repo_poll_delay_ms = nil
+end
+
+local function repo_poll_intervals()
+  local base = math.max(watch_options().interval_ms, 250)
+  local max_delay = 3000
+  local delays = {
+    base,
+    math.min(base * 2, max_delay),
+    math.min(base * 4, max_delay),
+    math.min(base * 8, max_delay),
+    max_delay,
+  }
+
+  local deduped = {}
+  for _, delay in ipairs(delays) do
+    if deduped[#deduped] ~= delay then
+      deduped[#deduped + 1] = delay
+    end
+  end
+
+  return deduped
+end
+
+local function reset_repo_poll_backoff()
+  M.repo_poll_backoff_index = 1
+end
+
+local function advance_repo_poll_backoff()
+  local delays = repo_poll_intervals()
+  M.repo_poll_backoff_index = math.min((M.repo_poll_backoff_index or 1) + 1, #delays)
+end
+
+local function current_repo_poll_delay()
+  local delays = repo_poll_intervals()
+  local index = math.min(math.max(M.repo_poll_backoff_index or 1, 1), #delays)
+  M.repo_poll_backoff_index = index
+  return delays[index]
+end
+
+local function repo_poll_backoff_exhausted()
+  local delays = repo_poll_intervals()
+  return (M.repo_poll_backoff_index or 1) >= #delays
+end
+
+local function schedule_repo_poll(reset_backoff)
+  if not watch_options().enabled then
+    stop_repo_poll()
+    reset_repo_poll_backoff()
+    return
+  end
+
+  if reset_backoff then
+    reset_repo_poll_backoff()
+  end
+
+  if not M.repo_poll_timer then
+    M.repo_poll_timer = vim.uv.new_timer()
+  end
+  if not M.repo_poll_timer then
+    return
+  end
+
+  local delay = current_repo_poll_delay()
+  M.repo_poll_delay_ms = delay
+
+  pcall(function()
+    M.repo_poll_timer:stop()
+  end)
+
+  local ok = pcall(function()
+    M.repo_poll_timer:start(delay, 0, vim.schedule_wrap(function()
+      if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+        return
+      end
+      M.schedule_repo_refresh({ source = 'poll' })
+    end))
+  end)
+
+  if not ok then
+    close_handle(M.repo_poll_timer)
+    M.repo_poll_timer = nil
+    M.repo_poll_delay_ms = nil
+  end
+end
+
+local function stop_repo_watchers()
+  for _, watcher in ipairs(M.repo_watchers) do
+    close_handle(watcher)
+  end
+  M.repo_watchers = {}
+  M.repo_watch_signature = nil
+end
+
+local function finalize_repo_poll(changed, opts)
+  if not watch_options().enabled then
+    stop_repo_poll()
+    reset_repo_poll_backoff()
+    return
+  end
+
+  opts = opts or {}
+  if changed or opts.reset_poll then
+    reset_repo_poll_backoff()
+  elseif opts.source == 'poll' then
+    if repo_poll_backoff_exhausted() then
+      stop_repo_poll()
+      return
+    end
+    advance_repo_poll_backoff()
+  end
+
+  schedule_repo_poll(false)
 end
 
 local function snap_to_nearest_file(line, prefer_up)
@@ -155,6 +382,7 @@ function M.render(files)
 
   M.files = files
   M.line_map = {}
+  M.selected_line = nil
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
@@ -365,26 +593,196 @@ function M.highlight_active(file)
   end
 end
 
---- Re-fetch git status and re-render the file tree.
-function M.refresh()
-  -- Save selected line before re-rendering
+function M.apply_status_snapshot(snapshot)
   local saved_line = M.selected_line
+  snapshot = snapshot or {
+    output = '',
+    head_oid = nil,
+    key = '',
+    files = nil,
+  }
 
+  M.repo_head_oid = snapshot.head_oid
+  M.repo_snapshot_key = snapshot.key or ''
+  M.repo_status_output = snapshot.output or ''
+  M.render(snapshot.files)
+  restore_selection(saved_line)
+end
+
+local function sync_repo_watchers()
   local git = require('glance.git')
-  local files = git.get_changed_files()
-  M.render(files)
+  local paths = {}
+  local signature = ''
+  local watch_enabled = watch_options().enabled
 
-  -- Restore cursor position (use saved selected_line, not cursor)
-  if saved_line and M.win and vim.api.nvim_win_is_valid(M.win) then
-    local line_count = vim.api.nvim_buf_line_count(M.buf)
-    local target_line = math.min(saved_line, line_count)
-    M.selected_line = target_line
-    vim.api.nvim_win_set_cursor(M.win, { target_line, 4 })
-    -- If we landed on a header/blank, move to the nearest file entry
-    if not M.line_map[target_line] then
-      M.move_down()
+  if watch_enabled then
+    paths = git.repo_watch_paths()
+    signature = table.concat(paths, '\n')
+  end
+
+  if signature == M.repo_watch_signature then
+    return
+  end
+
+  stop_repo_watchers()
+  M.repo_watch_signature = signature
+
+  for _, path in ipairs(paths) do
+    local watcher = vim.uv.new_fs_poll()
+    if watcher then
+      local ok = pcall(function()
+        watcher:start(path, watch_options().interval_ms, function(err)
+          if err then
+            return
+          end
+          M.schedule_repo_refresh({
+            source = 'watch',
+            reset_poll = true,
+            resync_watchers = true,
+          })
+        end)
+      end)
+
+      if ok then
+        M.repo_watchers[#M.repo_watchers + 1] = watcher
+      else
+        close_handle(watcher)
+      end
     end
   end
+end
+
+function M.stop_repo_watch()
+  M.repo_refresh_generation = M.repo_refresh_generation + 1
+  stop_repo_poll()
+  stop_repo_watchers()
+  M.repo_refresh_pending = false
+  M.repo_refresh_inflight = false
+  M.repo_refresh_options = nil
+  reset_repo_poll_backoff()
+end
+
+function M.handle_repo_status_change(snapshot, opts)
+  local ui = require('glance.ui')
+  local diffview = require('glance.diffview')
+  local active_before = M.active_file
+  local previous_head_oid = M.repo_head_oid
+
+  opts = opts or {}
+  snapshot = snapshot or require('glance.git').get_status_snapshot()
+  if (snapshot.key or '') == M.repo_snapshot_key then
+    if opts.resync_watchers then
+      sync_repo_watchers()
+    end
+    finalize_repo_poll(false, opts)
+    return false
+  end
+
+  local head_changed = snapshot.head_oid ~= previous_head_oid
+  local active_after = find_matching_file(snapshot.files, active_before)
+  if ui.diff_open and active_before and not active_after then
+    if new_buffer_is_modified() then
+      M.apply_status_snapshot(snapshot)
+      M.highlight_active(nil)
+      vim.notify(
+        'glance: active diff changed in Git; keeping the current buffer open because it has unsaved edits',
+        vim.log.levels.WARN
+      )
+      sync_repo_watchers()
+      finalize_repo_poll(true, opts)
+      return true
+    end
+
+    M.apply_status_snapshot(snapshot)
+    diffview.close(false)
+    sync_repo_watchers()
+    finalize_repo_poll(true, opts)
+    return true
+  end
+
+  M.apply_status_snapshot(snapshot)
+  if ui.diff_open and active_after then
+    M.highlight_active(active_after)
+    if head_changed and active_after.section == 'staged' then
+      diffview.refresh(active_after)
+    end
+  end
+
+  if not ui.diff_open and files_empty(snapshot.files) then
+    M.highlight_active(nil)
+  end
+
+  sync_repo_watchers()
+  finalize_repo_poll(true, opts)
+  return true
+end
+
+function M.schedule_repo_refresh(opts)
+  opts = opts or {}
+  local pending_opts = M.repo_refresh_options or {}
+  pending_opts.reset_poll = pending_opts.reset_poll or opts.reset_poll
+  pending_opts.resync_watchers = pending_opts.resync_watchers or opts.resync_watchers
+  if pending_opts.source == nil or pending_opts.source == 'poll' then
+    pending_opts.source = opts.source or pending_opts.source
+  end
+  M.repo_refresh_options = pending_opts
+
+  if M.repo_refresh_pending or M.repo_refresh_inflight then
+    return
+  end
+
+  M.repo_refresh_pending = true
+  vim.schedule(function()
+    M.repo_refresh_pending = false
+    if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+      M.repo_refresh_options = nil
+      return
+    end
+
+    local pending_opts = M.repo_refresh_options or {}
+    M.repo_refresh_options = nil
+    M.repo_refresh_inflight = true
+    local refresh_generation = M.repo_refresh_generation
+
+    require('glance.git').get_status_snapshot_async(function(snapshot)
+      if refresh_generation ~= M.repo_refresh_generation then
+        M.repo_refresh_inflight = false
+        return
+      end
+
+      M.repo_refresh_inflight = false
+      if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+        return
+      end
+
+      M.handle_repo_status_change(snapshot, pending_opts)
+      if M.repo_refresh_options ~= nil then
+        M.schedule_repo_refresh()
+      end
+    end)
+  end)
+end
+
+function M.start_repo_watch()
+  sync_repo_watchers()
+  schedule_repo_poll(true)
+end
+
+function M.note_repo_activity(opts)
+  opts = opts or {}
+  if opts.resync_watchers then
+    sync_repo_watchers()
+  end
+  schedule_repo_poll(opts.reset_poll ~= false)
+end
+
+--- Re-fetch git status and re-render the file tree.
+function M.refresh()
+  M.handle_repo_status_change(require('glance.git').get_status_snapshot(), {
+    source = 'manual',
+    reset_poll = true,
+    resync_watchers = true,
+  })
 end
 
 --- Toggle the file tree sidebar visibility.

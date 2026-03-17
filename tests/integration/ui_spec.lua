@@ -193,6 +193,48 @@ return {
       end,
     },
     {
+      name = 'repo watcher closes stale diff panes after commit and shows the empty state',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          repo:commit_all('Commit while Glance is open')
+
+          N.wait(1500, function()
+            return not ui.diff_open and filetree.files
+              and #filetree.files.conflicts == 0
+              and #filetree.files.staged == 0
+              and #filetree.files.changes == 0
+              and #filetree.files.untracked == 0
+          end)
+
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
+          A.truthy(ui.welcome_win and vim.api.nvim_win_is_valid(ui.welcome_win))
+          A.equal(lines[#lines], '  No changes found')
+        end)
+      end,
+    },
+    {
+      name = 'repo watch polling surfaces newly created untracked files while Glance is open',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+
+          repo:write('notes/new-untracked.txt', 'hello\n')
+
+          N.wait(1500, function()
+            local files = filetree.files or {}
+            return #(files.untracked or {}) == 1
+              and files.untracked[1].path == 'notes/new-untracked.txt'
+          end)
+        end)
+      end,
+    },
+    {
       name = 'closing the filetree while only welcome is visible triggers quit',
       run = function()
         N.with_repo('repo_modified', function()

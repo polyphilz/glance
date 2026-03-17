@@ -176,5 +176,262 @@ return {
         A.equal(filetree.status_highlight('X'), nil)
       end,
     },
+    {
+      name = 'repo polling backs off when idle and resets after activity',
+      run = function()
+        local config = require('glance.config')
+        local git = require('glance.git')
+        local original_new_timer = vim.uv.new_timer
+        local original_new_fs_poll = vim.uv.new_fs_poll
+        local original_repo_watch_paths = git.repo_watch_paths
+        local timer
+
+        config.setup({
+          watch = {
+            enabled = true,
+            interval_ms = 200,
+          },
+        })
+
+        local ok, err = xpcall(function()
+          vim.uv.new_timer = function()
+            timer = {
+              starts = {},
+            }
+
+            function timer:start(delay, repeat_ms, callback)
+              self.starts[#self.starts + 1] = {
+                delay = delay,
+                repeat_ms = repeat_ms,
+              }
+              self.delay = delay
+              self.repeat_ms = repeat_ms
+              self.callback = callback
+            end
+
+            function timer:stop()
+            end
+
+            function timer:close()
+            end
+
+            return timer
+          end
+
+          vim.uv.new_fs_poll = function()
+            return nil
+          end
+
+          git.repo_watch_paths = function()
+            return {}
+          end
+
+          local filetree = setup_filetree()
+          filetree.start_repo_watch()
+          A.equal(filetree.repo_poll_delay_ms, 250)
+          A.equal(filetree.repo_poll_backoff_index, 1)
+
+          local snapshot = {
+            output = '',
+            files = {
+              conflicts = {},
+              staged = {},
+              changes = {},
+              untracked = {},
+            },
+          }
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(filetree.repo_poll_delay_ms, 500)
+          A.equal(filetree.repo_poll_backoff_index, 2)
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(filetree.repo_poll_delay_ms, 1000)
+          A.equal(filetree.repo_poll_backoff_index, 3)
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(filetree.repo_poll_delay_ms, 2000)
+          A.equal(filetree.repo_poll_backoff_index, 4)
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(filetree.repo_poll_delay_ms, 3000)
+          A.equal(filetree.repo_poll_backoff_index, 5)
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(filetree.repo_poll_timer, nil)
+          A.equal(filetree.repo_poll_delay_ms, nil)
+
+          filetree.note_repo_activity()
+          A.equal(filetree.repo_poll_delay_ms, 250)
+          A.equal(filetree.repo_poll_backoff_index, 1)
+        end, debug.traceback)
+
+        git.repo_watch_paths = original_repo_watch_paths
+        vim.uv.new_fs_poll = original_new_fs_poll
+        vim.uv.new_timer = original_new_timer
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'unchanged poll ticks skip watcher resync until explicitly requested',
+      run = function()
+        local config = require('glance.config')
+        local git = require('glance.git')
+        local original_new_timer = vim.uv.new_timer
+        local original_new_fs_poll = vim.uv.new_fs_poll
+        local original_repo_watch_paths = git.repo_watch_paths
+        local repo_watch_path_calls = 0
+
+        config.setup({
+          watch = {
+            enabled = true,
+            interval_ms = 200,
+          },
+        })
+
+        local ok, err = xpcall(function()
+          vim.uv.new_timer = function()
+            local timer = {}
+
+            function timer:start()
+            end
+
+            function timer:stop()
+            end
+
+            function timer:close()
+            end
+
+            return timer
+          end
+
+          vim.uv.new_fs_poll = function()
+            return nil
+          end
+
+          git.repo_watch_paths = function()
+            repo_watch_path_calls = repo_watch_path_calls + 1
+            return {}
+          end
+
+          local filetree = setup_filetree()
+          filetree.start_repo_watch()
+          A.equal(repo_watch_path_calls, 1)
+
+          local snapshot = {
+            output = '',
+            files = {
+              conflicts = {},
+              staged = {},
+              changes = {},
+              untracked = {},
+            },
+          }
+
+          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
+          A.equal(repo_watch_path_calls, 1)
+
+          filetree.handle_repo_status_change(snapshot, {
+            source = 'focus',
+            reset_poll = true,
+            resync_watchers = true,
+          })
+          A.equal(repo_watch_path_calls, 2)
+        end, debug.traceback)
+
+        git.repo_watch_paths = original_repo_watch_paths
+        vim.uv.new_fs_poll = original_new_fs_poll
+        vim.uv.new_timer = original_new_timer
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'scheduled repo refreshes fetch snapshots asynchronously and coalesce in flight requests',
+      run = function()
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local original_async_snapshot = git.get_status_snapshot_async
+        local original_handle = filetree.handle_repo_status_change
+        local callbacks = {}
+        local fetches = 0
+        local handled = {}
+
+        local ok, err = xpcall(function()
+          git.get_status_snapshot_async = function(callback)
+            fetches = fetches + 1
+            callbacks[#callbacks + 1] = callback
+          end
+
+          filetree.handle_repo_status_change = function(snapshot, opts)
+            handled[#handled + 1] = {
+              snapshot = snapshot,
+              opts = vim.deepcopy(opts),
+            }
+          end
+
+          filetree.schedule_repo_refresh({ source = 'poll' })
+          vim.wait(100, function()
+            return fetches == 1
+          end)
+          A.equal(fetches, 1)
+
+          filetree.schedule_repo_refresh({
+            source = 'watch',
+            reset_poll = true,
+            resync_watchers = true,
+          })
+          vim.wait(20)
+          A.equal(fetches, 1)
+
+          callbacks[1]({
+            key = 'first',
+            output = '',
+            files = {
+              conflicts = {},
+              staged = {},
+              changes = {},
+              untracked = {},
+            },
+          })
+
+          vim.wait(100, function()
+            return fetches == 2 and #handled == 1
+          end)
+          A.equal(fetches, 2)
+          A.equal(handled[1].opts.source, 'poll')
+
+          callbacks[2]({
+            key = 'second',
+            output = '',
+            files = {
+              conflicts = {},
+              staged = {},
+              changes = {},
+              untracked = {},
+            },
+          })
+
+          vim.wait(100, function()
+            return #handled == 2
+          end)
+          A.equal(handled[2].opts.source, 'watch')
+          A.truthy(handled[2].opts.reset_poll)
+          A.truthy(handled[2].opts.resync_watchers)
+        end, debug.traceback)
+
+        filetree.handle_repo_status_change = original_handle
+        git.get_status_snapshot_async = original_async_snapshot
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
   },
 }

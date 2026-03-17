@@ -4,6 +4,7 @@ local filetree = require('glance.filetree')
 local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
+local DELETED_NS = vim.api.nvim_create_namespace('glance_deleted')
 
 -- State
 M.old_buf = nil
@@ -56,26 +57,42 @@ local function placeholder_message(file, override)
   return messages[file.kind] or 'this git state is not supported yet'
 end
 
+local function old_content_ref(file)
+  if file.section == 'staged' then
+    return 'HEAD'
+  end
+  return ':'
+end
+
+local function old_content_path(file)
+  if file.section == 'staged' and file.old_path then
+    return file.old_path
+  end
+  return file.path
+end
+
+local function set_readonly_lines(buf, lines)
+  local readonly = vim.api.nvim_buf_get_option(buf, 'readonly')
+  vim.api.nvim_buf_set_option(buf, 'readonly', false)
+  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(buf, 'modifiable', false)
+  vim.api.nvim_buf_set_option(buf, 'readonly', readonly)
+end
+
+local function apply_deleted_highlights(buf, line_count)
+  vim.api.nvim_buf_clear_namespace(buf, DELETED_NS, 0, -1)
+  for i = 0, line_count - 1 do
+    vim.api.nvim_buf_add_highlight(buf, DELETED_NS, 'DiffDelete', i, 0, -1)
+  end
+end
+
 --- Open a standard 2-pane side-by-side diff for a modified file.
 function M.open(file)
   local root = git.repo_root()
   if not root then return end
 
-  -- Determine the ref for the old content
-  local old_ref
-  if file.section == 'staged' then
-    old_ref = 'HEAD'
-  else
-    old_ref = ':' -- index
-  end
-
-  -- For staged renames, the old content lives at old_path in HEAD.
-  -- For changes, the index already has the file at the new path.
-  local old_content_path = file.path
-  if file.section == 'staged' and file.old_path then
-    old_content_path = file.old_path
-  end
-  local old_lines = git.get_file_content(old_content_path, old_ref)
+  local old_lines = git.get_file_content(old_content_path(file), old_content_ref(file))
 
   -- Resize file tree
   resize_filetree()
@@ -208,10 +225,7 @@ function M.open_deleted(file)
   M.set_filetype_from_path(M.new_buf, file.path)
 
   -- Highlight all lines as deleted
-  local ns = vim.api.nvim_create_namespace('glance_deleted')
-  for i = 0, #lines - 1 do
-    vim.api.nvim_buf_add_highlight(M.new_buf, ns, 'DiffDelete', i, 0, -1)
-  end
+  apply_deleted_highlights(M.new_buf, #lines)
 
   M.equalize_panes()
   M.setup_autocmds(file)
@@ -232,6 +246,10 @@ function M.open_untracked(file)
   local full_path = root .. '/' .. file.path
   vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
   M.new_buf = vim.api.nvim_get_current_buf()
+
+  if watch_options().enabled then
+    M.watch_file(full_path)
+  end
 
   M.equalize_panes()
   M.setup_autocmds(file)
@@ -431,25 +449,27 @@ function M.setup_autocmds(file)
 
   -- When the new buffer is saved, refresh the diff
   if M.new_buf and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == '' then
-    vim.api.nvim_create_autocmd('FileChangedShellPost', {
-      group = M.autocmd_group,
-      buffer = M.new_buf,
-      callback = function()
-        vim.schedule(function()
-          M.refresh(file)
-        end)
-      end,
-    })
+      vim.api.nvim_create_autocmd('FileChangedShellPost', {
+        group = M.autocmd_group,
+        buffer = M.new_buf,
+        callback = function()
+          vim.schedule(function()
+            M.refresh(file)
+            filetree.note_repo_activity()
+          end)
+        end,
+      })
 
-    vim.api.nvim_create_autocmd('BufWritePost', {
-      group = M.autocmd_group,
-      buffer = M.new_buf,
-      callback = function()
-        vim.schedule(function()
-          M.refresh(file)
-        end)
-      end,
-    })
+      vim.api.nvim_create_autocmd('BufWritePost', {
+        group = M.autocmd_group,
+        buffer = M.new_buf,
+        callback = function()
+          vim.schedule(function()
+            M.refresh(file)
+            filetree.note_repo_activity()
+          end)
+        end,
+      })
   end
 end
 
@@ -565,32 +585,32 @@ end
 
 --- Refresh the diff after a save (re-read old content, update diff).
 function M.refresh(file)
-  if not M.old_buf or not vim.api.nvim_buf_is_valid(M.old_buf) then
-    return
-  end
-  if not M.old_win or not vim.api.nvim_win_is_valid(M.old_win) then
+  if not file then
     return
   end
 
-  -- Re-read old content from git
-  local old_ref = file.section == 'staged' and 'HEAD' or ':'
-  local old_lines = git.get_file_content(file.path, old_ref)
+  local old_lines = git.get_file_content(old_content_path(file), old_content_ref(file))
+  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf)
+    and M.old_win and vim.api.nvim_win_is_valid(M.old_win)
+  then
+    set_readonly_lines(M.old_buf, old_lines)
 
-  -- Update old buffer
-  local old_readonly = vim.api.nvim_buf_get_option(M.old_buf, 'readonly')
-  vim.api.nvim_buf_set_option(M.old_buf, 'readonly', false)
-  vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(M.old_buf, 0, -1, false, old_lines)
-  vim.api.nvim_buf_set_option(M.old_buf, 'modifiable', false)
-  vim.api.nvim_buf_set_option(M.old_buf, 'readonly', old_readonly)
+    -- Refresh diff
+    vim.cmd('diffupdate')
 
-  -- Refresh diff
-  vim.cmd('diffupdate')
+    -- Keep the minimap's git baseline in sync with the left pane refresh.
+    local minimap = require('glance.minimap')
+    minimap.old_lines = old_lines
+    minimap.flush_content_update({ run_even_if_clean = true })
+    return
+  end
 
-  -- Keep the minimap's git baseline in sync with the left pane refresh.
-  local minimap = require('glance.minimap')
-  minimap.old_lines = old_lines
-  minimap.flush_content_update({ run_even_if_clean = true })
+  if (file.kind == 'deleted' or file.status == 'D')
+    and M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf)
+  then
+    set_readonly_lines(M.new_buf, old_lines)
+    apply_deleted_highlights(M.new_buf, #old_lines)
+  end
 end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.

@@ -165,6 +165,43 @@ return {
       end,
     },
     {
+      name = 'manual refresh rebaselines an open staged diff when HEAD moves without status changing',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          repo:write(repo.files.tracked, 'alpha\nbeta second\ngamma\n')
+          repo:stage(repo.files.tracked)
+          repo:commit_all('Second commit')
+
+          repo:write(repo.files.tracked, 'alpha\nbeta third\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.staged[1])
+          local diffview = require('glance.diffview')
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), {
+            'alpha',
+            'beta second',
+            'gamma',
+          })
+
+          local before_key = filetree.repo_snapshot_key
+          repo:git({ 'reset', '--soft', 'HEAD^' })
+          filetree.refresh()
+
+          A.truthy(ui.diff_open)
+          A.not_equal(filetree.repo_snapshot_key, before_key)
+          A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), {
+            'alpha',
+            'beta',
+            'gamma',
+          })
+        end)
+      end,
+    },
+    {
       name = 'equalize panes and diff keymaps respect filetree visibility',
       run = function()
         N.with_repo('repo_modified', function()
@@ -342,6 +379,8 @@ return {
           A.equal(vim.api.nvim_get_option_value('cursorline', { win = diffview.new_win }), true)
           A.equal(vim.api.nvim_get_option_value('foldenable', { win = diffview.new_win }), true)
           A.equal(diffview.fs_watcher, nil)
+          A.equal(#filetree.repo_watchers, 0)
+          A.equal(filetree.repo_poll_timer, nil)
         end)
       end,
     },
@@ -428,6 +467,27 @@ return {
           end)
           A.truthy(ui.diff_open)
           A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
+        end)
+      end,
+    },
+    {
+      name = 'untracked files also reload external edits through the file watcher',
+      run = function()
+        N.with_repo('repo_untracked', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.untracked[1])
+          local diffview = require('glance.diffview')
+
+          A.truthy(diffview.fs_watcher ~= nil)
+
+          repo:write(repo.files.untracked, 'external untracked change\n')
+          N.wait(500, function()
+            local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
+            return lines[1] == 'external untracked change'
+          end)
         end)
       end,
     },

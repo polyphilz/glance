@@ -21,15 +21,34 @@ local function apply_colorscheme(colorscheme)
   end
 end
 
-local function setup_checktime_autocmd(enabled)
+local function setup_app_autocmds(app, watch_enabled)
   vim.api.nvim_clear_autocmds({ group = APP_AUGROUP })
-  if not enabled then
+
+  if app.checktime then
+    vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter' }, {
+      group = APP_AUGROUP,
+      command = 'silent! checktime',
+    })
+  end
+
+  if not watch_enabled then
     return
   end
 
-  vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold' }, {
+  vim.api.nvim_create_autocmd('FocusGained', {
     group = APP_AUGROUP,
-    command = 'silent! checktime',
+    callback = function()
+      local filetree = package.loaded['glance.filetree']
+      if not filetree or not filetree.buf or not vim.api.nvim_buf_is_valid(filetree.buf) then
+        return
+      end
+
+      filetree.schedule_repo_refresh({
+        source = 'focus',
+        reset_poll = true,
+        resync_watchers = true,
+      })
+    end,
   })
 end
 
@@ -58,7 +77,7 @@ function M.start()
   end
 
   -- Auto-detect external file changes (e.g. edits from Cursor/VS Code)
-  setup_checktime_autocmd(app.checktime)
+  setup_app_autocmds(app, config.options.watch.enabled)
   apply_colorscheme(app.colorscheme)
 
   -- Apply highlights AFTER colorscheme so they aren't overwritten
@@ -68,7 +87,8 @@ function M.start()
   M.setup_treesitter()
 
   -- Gather changed files
-  local files = git.get_changed_files()
+  local snapshot = git.get_status_snapshot()
+  local files = snapshot.files
 
   -- Check for empty state
   local total = #files.conflicts + #files.staged + #files.changes + #files.untracked
@@ -80,7 +100,8 @@ function M.start()
 
   -- Set up the UI and render file tree
   ui.setup_layout()
-  filetree.render(files)
+  filetree.apply_status_snapshot(snapshot)
+  filetree.start_repo_watch()
 end
 
 function M.setup_highlights()

@@ -23,7 +23,7 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
 
 - Standalone launcher that opens Glance in `nvim --clean`, so it does not depend on your plugin manager or existing editor config.
 - Single file tree for staged, unstaged, untracked, and conflicted files.
-- Side-by-side diffs with live refresh and an optional minimap.
+- Side-by-side diffs with live file reloads, Git status refresh, and an optional minimap.
 - Safe discard actions for one file or all repo changes, both with confirmation prompts.
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
 
