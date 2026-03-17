@@ -12,6 +12,7 @@ M.files = nil        -- The full files table { staged, changes, untracked, confl
 M.line_map = {}      -- Maps buffer line number -> file object (nil for headers/blanks)
 M.active_file = nil  -- Currently viewed file in diff mode
 M.selected_line = nil -- Tracks the cursor line set by j/k/J/K navigation
+M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snapping
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -52,6 +53,34 @@ local function add_highlight(highlights, line, col_start, col_end, group)
   highlights[#highlights + 1] = { line, col_start, col_end, group }
 end
 
+local function snap_to_nearest_file(line, prefer_up)
+  local total = vim.api.nvim_buf_line_count(M.buf)
+
+  local function scan(start_line, end_line, step)
+    for i = start_line, end_line, step do
+      if M.line_map[i] then
+        M.selected_line = i
+        vim.api.nvim_win_set_cursor(M.win, { i, 4 })
+        return true
+      end
+    end
+    return false
+  end
+
+  if prefer_up then
+    if scan(line - 1, 1, -1) then
+      return
+    end
+    scan(line + 1, total, 1)
+    return
+  end
+
+  if scan(line + 1, total, 1) then
+    return
+  end
+  scan(line - 1, 1, -1)
+end
+
 local function add_legend(lines, highlights)
   local km = config.options.keymaps
   local title = '  discard'
@@ -88,26 +117,13 @@ function M.create_buf()
     callback = function()
       if not M.win or not vim.api.nvim_win_is_valid(M.win) then return end
       local line = vim.api.nvim_win_get_cursor(M.win)[1]
+      local previous_line = M.last_cursor_line
+      M.last_cursor_line = line
       if M.line_map[line] then
         M.selected_line = line
         return
       end
-      -- Search down first, then up for nearest file entry
-      local total = vim.api.nvim_buf_line_count(buf)
-      for i = line + 1, total do
-        if M.line_map[i] then
-          M.selected_line = i
-          vim.api.nvim_win_set_cursor(M.win, { i, 4 })
-          return
-        end
-      end
-      for i = line - 1, 1, -1 do
-        if M.line_map[i] then
-          M.selected_line = i
-          vim.api.nvim_win_set_cursor(M.win, { i, 4 })
-          return
-        end
-      end
+      snap_to_nearest_file(line, previous_line ~= nil and line < previous_line)
     end,
   })
 
@@ -504,6 +520,8 @@ function M.setup_keymaps()
 
   vim.keymap.set('n', 'j', function() for _ = 1, vim.v.count1 do M.move_down() end end, opts)
   vim.keymap.set('n', 'k', function() for _ = 1, vim.v.count1 do M.move_up() end end, opts)
+  vim.keymap.set('n', '<Down>', function() for _ = 1, vim.v.count1 do M.move_down() end end, opts)
+  vim.keymap.set('n', '<Up>', function() for _ = 1, vim.v.count1 do M.move_up() end end, opts)
   vim.keymap.set('n', km.next_section, function() M.next_section() end, opts)
   vim.keymap.set('n', km.prev_section, function() M.prev_section() end, opts)
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)

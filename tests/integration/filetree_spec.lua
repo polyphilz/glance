@@ -67,6 +67,34 @@ return {
       end,
     },
     {
+      name = 'arrow keys cross section headers in both directions',
+      run = function()
+        N.with_repo('repo_untracked', function(repo)
+          repo:write(repo.files.tracked, 'alpha\nbeta changed\ngamma\n')
+          repo.files.staged_add = 'staged-only.txt'
+          repo:write(repo.files.staged_add, 'staged only\n')
+          repo:stage(repo.files.staged_add)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+
+          vim.api.nvim_set_current_win(filetree.win)
+          A.equal(filetree.selected_line, 5)
+
+          N.press('<Down>')
+          A.equal(filetree.selected_line, 8)
+
+          N.press('<Down>')
+          A.equal(filetree.selected_line, 11)
+
+          N.press('<Up>')
+          A.equal(filetree.selected_line, 8)
+
+          N.press('<Up>')
+          A.equal(filetree.selected_line, 5)
+        end)
+      end,
+    },
+    {
       name = 'refresh preserves selection where possible',
       run = function()
         N.with_repo('repo_untracked', function(repo)
