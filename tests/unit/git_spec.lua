@@ -404,6 +404,29 @@ return {
       end,
     },
     {
+      name = 'integration snapshot key changes when index content changes without porcelain changing',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+
+          repo:write(repo.files.tracked, 'alpha\nbeta second\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          local before = git.get_status_snapshot()
+
+          repo:write(repo.files.tracked, 'alpha\nbeta third\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          local after = git.get_status_snapshot()
+
+          A.equal(before.output, after.output)
+          A.equal(before.head_oid, after.head_oid)
+          A.not_equal(before.index_signature, after.index_signature)
+          A.not_equal(before.key, after.key)
+        end)
+      end,
+    },
+    {
       name = 'integration classifies real merge conflicts into the conflicts section',
       run = function()
         N.with_repo('repo_conflict', function(repo)

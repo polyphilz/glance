@@ -202,6 +202,40 @@ return {
       end,
     },
     {
+      name = 'manual refresh updates an open staged diff when index content changes without status changing',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          repo:write(repo.files.tracked, 'alpha\nbeta second\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.staged[1])
+          local diffview = require('glance.diffview')
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'alpha',
+            'beta second',
+            'gamma',
+          })
+
+          local before_key = filetree.repo_snapshot_key
+          repo:write(repo.files.tracked, 'alpha\nbeta third\ngamma\n')
+          repo:stage(repo.files.tracked)
+          filetree.refresh()
+
+          A.truthy(ui.diff_open)
+          A.not_equal(filetree.repo_snapshot_key, before_key)
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'alpha',
+            'beta third',
+            'gamma',
+          })
+        end)
+      end,
+    },
+    {
       name = 'equalize panes and diff keymaps respect filetree visibility',
       run = function()
         N.with_repo('repo_modified', function()

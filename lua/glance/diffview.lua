@@ -590,15 +590,31 @@ function M.refresh(file)
   end
 
   local old_lines = git.get_file_content(old_content_path(file), old_content_ref(file))
-  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf)
+  local old_side_open = M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf)
     and M.old_win and vim.api.nvim_win_is_valid(M.old_win)
-  then
+  local staged_new_side_open = file.section == 'staged'
+    and M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf)
+    and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == 'nofile'
+
+  if staged_new_side_open then
+    local index_lines = git.get_file_content(file.path, ':')
+    set_readonly_lines(M.new_buf, index_lines)
+  end
+
+  if old_side_open then
     set_readonly_lines(M.old_buf, old_lines)
 
     -- Refresh diff
     vim.cmd('diffupdate')
 
     -- Keep the minimap's git baseline in sync with the left pane refresh.
+    local minimap = require('glance.minimap')
+    minimap.old_lines = old_lines
+    minimap.flush_content_update({ run_even_if_clean = true })
+    return
+  end
+
+  if staged_new_side_open then
     local minimap = require('glance.minimap')
     minimap.old_lines = old_lines
     minimap.flush_content_update({ run_even_if_clean = true })

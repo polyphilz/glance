@@ -29,6 +29,8 @@ local DISCARDABLE_KINDS = {
 
 M._repo_root = nil
 M._repo_root_cwd = nil
+M._git_dir = nil
+M._git_dir_root = nil
 
 local function empty_files()
   return { staged = {}, changes = {}, untracked = {}, conflicts = {} }
@@ -45,6 +47,71 @@ local function repo_root_command_output()
     return nil
   end
   return vim.trim(result)
+end
+
+local function normalize_git_dir(root, git_dir)
+  if type(git_dir) ~= 'string' or git_dir == '' then
+    return nil
+  end
+
+  if git_dir:sub(1, 1) == '/' then
+    return git_dir
+  end
+
+  return root .. '/' .. git_dir
+end
+
+local function git_dir_command_output(root)
+  if not root or root == '' then
+    return nil
+  end
+
+  local output = vim.fn.system({ 'git', '-C', root, 'rev-parse', '--git-dir' })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+
+  return normalize_git_dir(root, vim.trim(output))
+end
+
+local function git_dir_at_root(root)
+  if not root or root == '' then
+    return nil
+  end
+
+  if M._git_dir and M._git_dir_root == root then
+    return M._git_dir
+  end
+
+  M._git_dir_root = root
+  M._git_dir = git_dir_command_output(root)
+  return M._git_dir
+end
+
+local function format_timespec(spec)
+  if type(spec) == 'table' then
+    return tostring(spec.sec or 0) .. ':' .. tostring(spec.nsec or 0)
+  end
+
+  return tostring(spec or 0)
+end
+
+local function index_signature_at_root(root)
+  local git_dir = git_dir_at_root(root)
+  if not git_dir then
+    return ''
+  end
+
+  local stat = vim.uv.fs_stat(git_dir .. '/index')
+  if not stat then
+    return ''
+  end
+
+  return table.concat({
+    tostring(stat.size or 0),
+    format_timespec(stat.mtime),
+    format_timespec(stat.ctime),
+  }, ':')
 end
 
 local function run_git_capture_at_root_async(root, args, opts, callback)
@@ -303,22 +370,34 @@ function M.get_changed_files()
   return M.get_status_snapshot().files
 end
 
-local function snapshot_key(output, head_oid)
-  return (output or '') .. '\0' .. (head_oid or '')
+local function snapshot_key(output, head_oid, index_signature)
+  return table.concat({
+    output or '',
+    head_oid or '',
+    index_signature or '',
+  }, '\0')
 end
 
-local function build_status_snapshot(output, head_oid)
+local function build_status_snapshot(output, head_oid, opts)
+  opts = opts or {}
   output = output or ''
+  local index_signature = opts.index_signature
+  if index_signature == nil then
+    index_signature = index_signature_at_root(opts.root or M.repo_root())
+  end
   return {
     output = output,
     head_oid = head_oid,
-    key = snapshot_key(output, head_oid),
+    index_signature = index_signature,
+    key = snapshot_key(output, head_oid, index_signature),
     files = M.build_file_sections(M.parse_porcelain_entries(output)),
   }
 end
 
 local function empty_snapshot()
-  return build_status_snapshot('', nil)
+  return build_status_snapshot('', nil, {
+    index_signature = '',
+  })
 end
 
 function M.head_oid()
@@ -338,7 +417,8 @@ function M.head_oid()
 end
 
 function M.get_status_snapshot()
-  if not M.repo_root() then
+  local root = M.repo_root()
+  if not root then
     return empty_snapshot()
   end
 
@@ -347,7 +427,9 @@ function M.get_status_snapshot()
     return empty_snapshot()
   end
 
-  return build_status_snapshot(output, M.head_oid())
+  return build_status_snapshot(output, M.head_oid(), {
+    root = root,
+  })
 end
 
 function M.get_status_snapshot_async(callback, opts)
@@ -384,32 +466,15 @@ function M.get_status_snapshot_async(callback, opts)
         end
       end
 
-      callback(build_status_snapshot(output, head_oid))
+      callback(build_status_snapshot(output, head_oid, {
+        root = root,
+      }))
     end)
   end)
 end
 
 function M.git_dir()
-  local root = M.repo_root()
-  if not root then
-    return nil
-  end
-
-  local ok, output = run_git({ 'rev-parse', '--git-dir' })
-  if not ok then
-    return nil
-  end
-
-  local git_dir = vim.trim(output)
-  if git_dir == '' then
-    return nil
-  end
-
-  if git_dir:sub(1, 1) == '/' then
-    return git_dir
-  end
-
-  return root .. '/' .. git_dir
+  return git_dir_at_root(M.repo_root())
 end
 
 function M.repo_watch_paths()

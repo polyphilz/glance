@@ -467,14 +467,12 @@ function M.handle_repo_status_change(snapshot, opts)
   local ui = require('glance.ui')
   local diffview = require('glance.diffview')
   local active_before = M.active_file
-  local previous_head_oid = M.repo_head_oid
 
   snapshot = snapshot or require('glance.git').get_status_snapshot()
   if (snapshot.key or '') == M.repo_snapshot_key then
     return false
   end
 
-  local head_changed = snapshot.head_oid ~= previous_head_oid
   local active_after = find_matching_file(snapshot.files, active_before)
   if ui.diff_open and active_before and not active_after then
     if new_buffer_is_modified() then
@@ -495,9 +493,7 @@ function M.handle_repo_status_change(snapshot, opts)
   M.apply_status_snapshot(snapshot)
   if ui.diff_open and active_after then
     M.highlight_active(active_after)
-    if head_changed and active_after.section == 'staged' then
-      diffview.refresh(active_after)
-    end
+    diffview.refresh(active_after)
   end
 
   if not ui.diff_open and files_empty(snapshot.files) then
