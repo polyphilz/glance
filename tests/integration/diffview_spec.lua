@@ -165,6 +165,77 @@ return {
       end,
     },
     {
+      name = 'manual refresh rebaselines an open staged diff when HEAD moves without status changing',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          repo:write(repo.files.tracked, 'alpha\nbeta second\ngamma\n')
+          repo:stage(repo.files.tracked)
+          repo:commit_all('Second commit')
+
+          repo:write(repo.files.tracked, 'alpha\nbeta third\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.staged[1])
+          local diffview = require('glance.diffview')
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), {
+            'alpha',
+            'beta second',
+            'gamma',
+          })
+
+          local before_key = filetree.repo_snapshot_key
+          repo:git({ 'reset', '--soft', 'HEAD^' })
+          filetree.refresh()
+
+          A.truthy(ui.diff_open)
+          A.not_equal(filetree.repo_snapshot_key, before_key)
+          A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), {
+            'alpha',
+            'beta',
+            'gamma',
+          })
+        end)
+      end,
+    },
+    {
+      name = 'manual refresh updates an open staged diff when index content changes without status changing',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          repo:write(repo.files.tracked, 'alpha\nbeta second\ngamma\n')
+          repo:stage(repo.files.tracked)
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          ui.open_file(filetree.files.staged[1])
+          local diffview = require('glance.diffview')
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'alpha',
+            'beta second',
+            'gamma',
+          })
+
+          local before_key = filetree.repo_snapshot_key
+          repo:write(repo.files.tracked, 'alpha\nbeta third\ngamma\n')
+          repo:stage(repo.files.tracked)
+          filetree.refresh()
+
+          A.truthy(ui.diff_open)
+          A.not_equal(filetree.repo_snapshot_key, before_key)
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'alpha',
+            'beta third',
+            'gamma',
+          })
+        end)
+      end,
+    },
+    {
       name = 'equalize panes and diff keymaps respect filetree visibility',
       run = function()
         N.with_repo('repo_modified', function()
@@ -346,6 +417,45 @@ return {
       end,
     },
     {
+      name = 'watch disabled registers CursorHold checktime for in-place reloads',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          require('glance').setup({
+            app = {
+              checktime = true,
+            },
+            watch = {
+              enabled = false,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+
+          A.equal(diffview.fs_watcher, nil)
+
+          local app_autocmds = vim.api.nvim_get_autocmds({
+            group = 'GlanceApp',
+            event = 'CursorHold',
+          })
+          A.truthy(#app_autocmds > 0)
+
+          repo:write(repo.files.tracked, 'external change via CursorHold\n')
+          vim.wait(1100)
+          vim.api.nvim_set_current_win(diffview.new_win)
+          vim.cmd('silent! checktime')
+
+          N.wait(500, function()
+            local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
+            return lines[1] == 'external change via CursorHold'
+          end)
+        end)
+      end,
+    },
+    {
       name = 'save refreshes disk and minimap and watcher reloads external edits',
       run = function()
         N.with_repo('repo_modified', function(repo)
@@ -428,6 +538,27 @@ return {
           end)
           A.truthy(ui.diff_open)
           A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
+        end)
+      end,
+    },
+    {
+      name = 'untracked files also reload external edits through the file watcher',
+      run = function()
+        N.with_repo('repo_untracked', function(repo)
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.untracked[1])
+          local diffview = require('glance.diffview')
+
+          A.truthy(diffview.fs_watcher ~= nil)
+
+          repo:write(repo.files.untracked, 'external untracked change\n')
+          N.wait(500, function()
+            local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
+            return lines[1] == 'external untracked change'
+          end)
         end)
       end,
     },

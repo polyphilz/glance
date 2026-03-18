@@ -145,7 +145,7 @@ return {
       end,
     },
     {
-      name = 'content edits are coalesced into one full update',
+      name = 'content edits are coalesced into one diff recompute',
       run = function()
         N.with_repo('repo_modified', function()
           require('glance').start()
@@ -154,9 +154,10 @@ return {
 
           ui.open_file(filetree.files.changes[1])
           local diffview = require('glance.diffview')
+          local logic = require('glance.minimap_logic')
           local minimap = require('glance.minimap')
 
-          with_counted_function(minimap, 'full_update', function(get_calls)
+          with_counted_function(logic, 'compute_line_types', function(get_calls)
             vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, {
               'one',
               'two',

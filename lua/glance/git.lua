@@ -27,6 +27,11 @@ local DISCARDABLE_KINDS = {
   untracked = true,
 }
 
+M._repo_root = nil
+M._repo_root_cwd = nil
+M._git_dir = nil
+M._git_dir_root = nil
+
 local function empty_files()
   return { staged = {}, changes = {}, untracked = {}, conflicts = {} }
 end
@@ -34,6 +39,111 @@ end
 local function run_git(args)
   local ok, output = M.run_git_capture(args)
   return ok, output
+end
+
+local function repo_root_command_output()
+  local result = vim.fn.system('git rev-parse --show-toplevel 2>/dev/null')
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return vim.trim(result)
+end
+
+local function normalize_git_dir(root, git_dir)
+  if type(git_dir) ~= 'string' or git_dir == '' then
+    return nil
+  end
+
+  if git_dir:sub(1, 1) == '/' then
+    return git_dir
+  end
+
+  return root .. '/' .. git_dir
+end
+
+local function git_dir_command_output(root)
+  if not root or root == '' then
+    return nil
+  end
+
+  local output = vim.fn.system({ 'git', '-C', root, 'rev-parse', '--git-dir' })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+
+  return normalize_git_dir(root, vim.trim(output))
+end
+
+local function git_dir_at_root(root)
+  if not root or root == '' then
+    return nil
+  end
+
+  if M._git_dir and M._git_dir_root == root then
+    return M._git_dir
+  end
+
+  M._git_dir_root = root
+  M._git_dir = git_dir_command_output(root)
+  return M._git_dir
+end
+
+local function format_timespec(spec)
+  if type(spec) == 'table' then
+    return tostring(spec.sec or 0) .. ':' .. tostring(spec.nsec or 0)
+  end
+
+  return tostring(spec or 0)
+end
+
+local function index_signature_at_root(root)
+  local git_dir = git_dir_at_root(root)
+  if not git_dir then
+    return ''
+  end
+
+  local stat = vim.uv.fs_stat(git_dir .. '/index')
+  if not stat then
+    return ''
+  end
+
+  return table.concat({
+    tostring(stat.size or 0),
+    format_timespec(stat.mtime),
+    format_timespec(stat.ctime),
+  }, ':')
+end
+
+local function run_git_capture_at_root_async(root, args, opts, callback)
+  local cmd = { 'git', '-C', root }
+  vim.list_extend(cmd, args)
+  local schedule_callback = opts == nil or opts.schedule_callback ~= false
+
+  vim.system(cmd, { text = true }, function(result)
+    local output = result.stdout or ''
+    local allowed_codes = (opts and opts.allowed_codes) or { 0 }
+    local function deliver(...)
+      if schedule_callback then
+        local argv = { ... }
+        vim.schedule(function()
+          callback(unpack(argv))
+        end)
+        return
+      end
+      callback(...)
+    end
+
+    if not vim.tbl_contains(allowed_codes, result.code) then
+      local message = vim.trim(output ~= '' and output or (result.stderr or ''))
+      if message == '' then
+        message = 'git command failed'
+      end
+      deliver(false, message)
+      return
+    end
+
+    deliver(true, output)
+  end)
 end
 
 function M.run_git_capture(args, opts)
@@ -84,11 +194,17 @@ end
 
 --- Get the root path of the git repository.
 function M.repo_root()
-  local result = vim.fn.system('git rev-parse --show-toplevel 2>/dev/null')
-  if vim.v.shell_error ~= 0 then
-    return nil
+  local cwd = vim.uv.cwd()
+  if M._repo_root
+    and M._repo_root ~= ''
+    and M._repo_root_cwd == cwd
+  then
+    return M._repo_root
   end
-  return vim.trim(result)
+
+  M._repo_root_cwd = cwd
+  M._repo_root = repo_root_command_output()
+  return M._repo_root
 end
 
 local function entry_is_untracked(entry)
@@ -251,16 +367,149 @@ function M.parse_porcelain_status(output)
 end
 
 function M.get_changed_files()
-  if not M.repo_root() then
-    return empty_files()
+  return M.get_status_snapshot().files
+end
+
+local function snapshot_key(output, head_oid, index_signature)
+  return table.concat({
+    output or '',
+    head_oid or '',
+    index_signature or '',
+  }, '\0')
+end
+
+local function build_status_snapshot(output, head_oid, opts)
+  opts = opts or {}
+  output = output or ''
+  local index_signature = opts.index_signature
+  if index_signature == nil then
+    index_signature = index_signature_at_root(opts.root or M.repo_root())
+  end
+  return {
+    output = output,
+    head_oid = head_oid,
+    index_signature = index_signature,
+    key = snapshot_key(output, head_oid, index_signature),
+    files = M.build_file_sections(M.parse_porcelain_entries(output)),
+  }
+end
+
+local function empty_snapshot()
+  return build_status_snapshot('', nil, {
+    index_signature = '',
+  })
+end
+
+function M.head_oid()
+  local ok, output = M.run_git_capture({ 'rev-parse', '--verify', '-q', 'HEAD' }, {
+    allowed_codes = { 0, 1 },
+  })
+  if not ok then
+    return nil
+  end
+
+  local oid = vim.trim(output)
+  if oid == '' then
+    return nil
+  end
+
+  return oid
+end
+
+function M.get_status_snapshot()
+  local root = M.repo_root()
+  if not root then
+    return empty_snapshot()
   end
 
   local ok, output = run_git({ 'status', '--porcelain=v1', '--untracked-files=all' })
   if not ok then
-    return empty_files()
+    return empty_snapshot()
   end
 
-  return M.build_file_sections(M.parse_porcelain_entries(output))
+  return build_status_snapshot(output, M.head_oid(), {
+    root = root,
+  })
+end
+
+function M.get_status_snapshot_async(callback, opts)
+  opts = opts or {}
+  local root = opts.root or M.repo_root()
+  if not root then
+    if opts.schedule_callback == false then
+      callback(empty_snapshot())
+    else
+      vim.schedule(function()
+        callback(empty_snapshot())
+      end)
+    end
+    return
+  end
+
+  run_git_capture_at_root_async(root, { 'status', '--porcelain=v1', '--untracked-files=all' }, {
+    schedule_callback = opts.schedule_callback,
+  }, function(ok, output)
+    if not ok then
+      callback(empty_snapshot())
+      return
+    end
+
+    run_git_capture_at_root_async(root, { 'rev-parse', '--verify', '-q', 'HEAD' }, {
+      allowed_codes = { 0, 1 },
+      schedule_callback = opts.schedule_callback,
+    }, function(head_ok, head_output)
+      local head_oid = nil
+      if head_ok then
+        head_oid = vim.trim(head_output)
+        if head_oid == '' then
+          head_oid = nil
+        end
+      end
+
+      callback(build_status_snapshot(output, head_oid, {
+        root = root,
+      }))
+    end)
+  end)
+end
+
+function M.git_dir()
+  return git_dir_at_root(M.repo_root())
+end
+
+function M.repo_watch_paths()
+  local git_dir = M.git_dir()
+  if not git_dir then
+    return {}
+  end
+
+  local candidates = {
+    git_dir .. '/HEAD',
+    git_dir .. '/index',
+    git_dir .. '/packed-refs',
+  }
+
+  local ok, output = M.run_git_capture({ 'symbolic-ref', '-q', 'HEAD' }, {
+    allowed_codes = { 0, 1 },
+  })
+  if ok then
+    local ref = vim.trim(output)
+    if ref ~= '' then
+      candidates[#candidates + 1] = git_dir .. '/' .. ref
+    end
+  end
+
+  local paths = {}
+  local seen = {}
+  for _, path in ipairs(candidates) do
+    if not seen[path] and vim.uv.fs_stat(path) then
+      seen[path] = true
+      paths[#paths + 1] = path
+    end
+  end
+
+  table.sort(paths)
+  return paths
 end
 
 --- Retrieve file content at a specific git ref.

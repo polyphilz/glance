@@ -114,6 +114,7 @@ return {
           },
           watch = {
             enabled = true,
+            poll = true,
             interval_ms = 200,
           },
         })
@@ -179,6 +180,7 @@ return {
         A.equal(config.options.keymaps.discard_all, 'D')
         A.equal(config.options.minimap.enabled, false)
         A.equal(config.options.watch.enabled, true)
+        A.equal(config.options.watch.poll, true)
       end,
     },
     {

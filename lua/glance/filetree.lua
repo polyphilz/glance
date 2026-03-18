@@ -1,5 +1,6 @@
 local config = require('glance.config')
 local pane_navigation = require('glance.pane_navigation')
+local repo_sync = require('glance.repo_sync')
 
 local M = {}
 local FILETREE_NS = vim.api.nvim_create_namespace('glance_filetree')
@@ -12,6 +13,9 @@ M.line_map = {}      -- Maps buffer line number -> file object (nil for headers/
 M.active_file = nil  -- Currently viewed file in diff mode
 M.selected_line = nil -- Tracks the cursor line set by j/k/J/K navigation
 M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snapping
+M.repo_head_oid = nil
+M.repo_snapshot_key = ''
+M.repo_status_output = ''
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -61,6 +65,79 @@ local function legend_line_count()
     return 4
   end
   return 0
+end
+
+local function files_empty(files)
+  files = files or {}
+  return #(files.conflicts or {}) == 0
+    and #(files.staged or {}) == 0
+    and #(files.changes or {}) == 0
+    and #(files.untracked or {}) == 0
+end
+
+local function same_file_identity(left, right)
+  return type(left) == 'table'
+    and type(right) == 'table'
+    and left.path == right.path
+    and left.old_path == right.old_path
+    and left.section == right.section
+    and left.raw_status == right.raw_status
+end
+
+local function find_matching_file(files, target)
+  if type(target) ~= 'table' then
+    return nil
+  end
+
+  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
+    for _, file in ipairs((files and files[section]) or {}) do
+      if same_file_identity(file, target) then
+        return file
+      end
+    end
+  end
+
+  return nil
+end
+
+local function restore_selection(saved_line)
+  if not saved_line or not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return
+  end
+
+  local line_count = vim.api.nvim_buf_line_count(M.buf)
+  if line_count == 0 then
+    M.selected_line = nil
+    return
+  end
+
+  local target_line = math.min(saved_line, line_count)
+  M.selected_line = target_line
+  vim.api.nvim_win_set_cursor(M.win, { target_line, 4 })
+  if M.line_map[target_line] then
+    return
+  end
+
+  M.move_down()
+  if not M.get_selected_file() then
+    M.move_up()
+  end
+  if not M.get_selected_file() then
+    M.selected_line = nil
+  end
+end
+
+local function new_buffer_is_modified()
+  local diffview = require('glance.diffview')
+  if not diffview.new_buf or not vim.api.nvim_buf_is_valid(diffview.new_buf) then
+    return false
+  end
+
+  if vim.api.nvim_buf_get_option(diffview.new_buf, 'buftype') ~= '' then
+    return false
+  end
+
+  return vim.api.nvim_buf_get_option(diffview.new_buf, 'modified')
 end
 
 local function snap_to_nearest_file(line, prefer_up)
@@ -155,6 +232,7 @@ function M.render(files)
 
   M.files = files
   M.line_map = {}
+  M.selected_line = nil
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
@@ -365,26 +443,101 @@ function M.highlight_active(file)
   end
 end
 
+function M.apply_status_snapshot(snapshot)
+  local saved_line = M.selected_line
+  snapshot = snapshot or {
+    output = '',
+    head_oid = nil,
+    key = '',
+    files = nil,
+  }
+
+  M.repo_head_oid = snapshot.head_oid
+  M.repo_snapshot_key = snapshot.key or ''
+  M.repo_status_output = snapshot.output or ''
+  M.render(snapshot.files)
+  restore_selection(saved_line)
+end
+
+function M.stop_repo_watch()
+  repo_sync.stop()
+end
+
+function M.handle_repo_status_change(snapshot, opts)
+  local ui = require('glance.ui')
+  local diffview = require('glance.diffview')
+  local active_before = M.active_file
+
+  snapshot = snapshot or require('glance.git').get_status_snapshot()
+  if (snapshot.key or '') == M.repo_snapshot_key then
+    return false
+  end
+
+  local active_after = find_matching_file(snapshot.files, active_before)
+  if ui.diff_open and active_before and not active_after then
+    if new_buffer_is_modified() then
+      M.apply_status_snapshot(snapshot)
+      M.highlight_active(nil)
+      vim.notify(
+        'glance: active diff changed in Git; keeping the current buffer open because it has unsaved edits',
+        vim.log.levels.WARN
+      )
+      return true
+    end
+
+    M.apply_status_snapshot(snapshot)
+    diffview.close(false)
+    return true
+  end
+
+  M.apply_status_snapshot(snapshot)
+  if ui.diff_open and active_after then
+    M.highlight_active(active_after)
+    diffview.refresh(active_after)
+  end
+
+  if not ui.diff_open and files_empty(snapshot.files) then
+    M.highlight_active(nil)
+  end
+
+  return true
+end
+
+function M.schedule_repo_refresh(opts)
+  repo_sync.request_refresh(opts)
+end
+
+function M.start_repo_watch()
+  repo_sync.start({
+    root = require('glance.git').repo_root(),
+    get_current_snapshot_key = function()
+      return M.repo_snapshot_key
+    end,
+    on_snapshot = function(snapshot, refresh_opts)
+      M.handle_repo_status_change(snapshot, refresh_opts)
+    end,
+    is_active_fast = function()
+      return M.buf ~= nil
+    end,
+    is_active = function()
+      return M.buf ~= nil and vim.api.nvim_buf_is_valid(M.buf)
+    end,
+  })
+end
+
+function M.note_repo_activity(opts)
+  repo_sync.note_activity(opts)
+end
+
 --- Re-fetch git status and re-render the file tree.
 function M.refresh()
-  -- Save selected line before re-rendering
-  local saved_line = M.selected_line
-
-  local git = require('glance.git')
-  local files = git.get_changed_files()
-  M.render(files)
-
-  -- Restore cursor position (use saved selected_line, not cursor)
-  if saved_line and M.win and vim.api.nvim_win_is_valid(M.win) then
-    local line_count = vim.api.nvim_buf_line_count(M.buf)
-    local target_line = math.min(saved_line, line_count)
-    M.selected_line = target_line
-    vim.api.nvim_win_set_cursor(M.win, { target_line, 4 })
-    -- If we landed on a header/blank, move to the nearest file entry
-    if not M.line_map[target_line] then
-      M.move_down()
-    end
-  end
+  M.handle_repo_status_change(require('glance.git').get_status_snapshot(), {
+    source = 'manual',
+  })
+  repo_sync.note_activity({
+    reset_poll = true,
+    resync_watchers = true,
+  })
 end
 
 --- Toggle the file tree sidebar visibility.

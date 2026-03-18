@@ -537,6 +537,7 @@ function M.open_file(file)
 
   M.diff_open = true
   filetree.highlight_active(file)
+  filetree.note_repo_activity()
   M.update_separator_hover()
 end
 

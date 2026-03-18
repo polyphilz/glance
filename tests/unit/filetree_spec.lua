@@ -1,4 +1,5 @@
 local A = require('tests.helpers.assert')
+local N = require('tests.helpers.nvim')
 
 local function setup_filetree()
   local filetree = require('glance.filetree')
@@ -7,6 +8,21 @@ local function setup_filetree()
   vim.api.nvim_win_set_buf(win, buf)
   filetree.win = win
   return filetree
+end
+
+local function snapshot(files, opts)
+  opts = opts or {}
+  return {
+    head_oid = opts.head_oid,
+    key = opts.key or '',
+    output = opts.output or '',
+    files = files or {
+      conflicts = {},
+      staged = {},
+      changes = {},
+      untracked = {},
+    },
+  }
 end
 
 return {
@@ -174,6 +190,180 @@ return {
         A.equal(filetree.status_highlight('U'), 'GlanceStatusConflict')
         A.equal(filetree.status_highlight('?'), 'GlanceStatusU')
         A.equal(filetree.status_highlight('X'), nil)
+      end,
+    },
+    {
+      name = 'staged diff refreshes in place when only HEAD changes',
+      run = function()
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_refresh = diffview.refresh
+        local refreshed
+
+        local ok, err = xpcall(function()
+          diffview.refresh = function(file)
+            refreshed = file
+          end
+
+          local filetree = setup_filetree()
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = 'M ',
+            section = 'staged',
+          }
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = { before },
+            changes = {},
+            untracked = {},
+          }, {
+            head_oid = 'head-1',
+            key = 'first',
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {
+              {
+                path = 'tracked.txt',
+                status = 'M',
+                raw_status = 'M ',
+                section = 'staged',
+              },
+            },
+            changes = {},
+            untracked = {},
+          }, {
+            head_oid = 'head-2',
+            key = 'second',
+          }))
+
+          A.equal(refreshed.path, 'tracked.txt')
+          A.equal(refreshed.section, 'staged')
+        end, debug.traceback)
+
+        diffview.refresh = original_refresh
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'stale diff closes when the active file disappears and the buffer is clean',
+      run = function()
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_close = diffview.close
+        local close_called
+
+        local ok, err = xpcall(function()
+          diffview.close = function(force)
+            close_called = force
+          end
+
+          local filetree = setup_filetree()
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = ' M',
+            section = 'changes',
+          }
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = { before },
+            untracked = {},
+          }, {
+            key = 'first',
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+          diffview.new_buf = vim.api.nvim_create_buf(true, false)
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = {},
+            untracked = {},
+          }, {
+            key = 'second',
+          }))
+
+          A.equal(close_called, false)
+        end, debug.traceback)
+
+        diffview.close = original_close
+        diffview.new_buf = nil
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'stale diff stays open when the active buffer has unsaved edits',
+      run = function()
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_close = diffview.close
+        local messages, restore = N.capture_notifications()
+        local close_called = false
+
+        local ok, err = xpcall(function()
+          diffview.close = function()
+            close_called = true
+          end
+
+          local filetree = setup_filetree()
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = ' M',
+            section = 'changes',
+          }
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = { before },
+            untracked = {},
+          }, {
+            key = 'first',
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+
+          diffview.new_buf = vim.api.nvim_create_buf(true, false)
+          vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, { 'unsaved edit' })
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = {},
+            untracked = {},
+          }, {
+            key = 'second',
+          }))
+
+          A.falsy(close_called)
+          A.equal(filetree.active_file, nil)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+          A.contains(messages[1].msg, 'keeping the current buffer open because it has unsaved edits')
+        end, debug.traceback)
+
+        restore()
+        diffview.close = original_close
+        diffview.new_buf = nil
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
       end,
     },
   },

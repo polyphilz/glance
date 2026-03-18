@@ -154,6 +154,7 @@ local ALLOWED_MINIMAP = {
 
 local ALLOWED_WATCH = {
   enabled = true,
+  poll = true,
   interval_ms = true,
 }
 
@@ -233,6 +234,7 @@ local BASE_DEFAULTS = {
   },
   watch = {
     enabled = true,
+    poll = true,
     interval_ms = 200,
   },
 }
@@ -468,6 +470,7 @@ local function validate_watch(options)
   local watch = options.watch
   validate_known_keys(watch, ALLOWED_WATCH, 'watch')
   validate_boolean(watch.enabled, 'watch.enabled')
+  validate_boolean(watch.poll, 'watch.poll')
   validate_integer(watch.interval_ms, 'watch.interval_ms', 0)
 end
 

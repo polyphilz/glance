@@ -37,14 +37,22 @@ function M.reset()
   local diffview = loaded['glance.diffview']
   local filetree = loaded['glance.filetree']
   local minimap = loaded['glance.minimap']
+  local repo_sync = loaded['glance.repo_sync']
   local ui = loaded['glance.ui']
 
   if diffview and diffview.stop_watching then
     pcall(diffview.stop_watching)
   end
+  if filetree and filetree.stop_repo_watch then
+    pcall(filetree.stop_repo_watch)
+  end
+  if repo_sync and repo_sync.stop then
+    pcall(repo_sync.stop)
+  end
 
   clear_group(diffview and diffview.autocmd_group)
   clear_group(minimap and minimap.augroup)
+  clear_group('GlanceApp')
 
   if ui then
     close_handle(ui.welcome_timer)
@@ -77,6 +85,9 @@ function M.reset()
     filetree.active_file = nil
     filetree.selected_line = nil
     filetree.last_cursor_line = nil
+    filetree.repo_head_oid = nil
+    filetree.repo_snapshot_key = ''
+    filetree.repo_status_output = ''
   end
 
   if minimap then
