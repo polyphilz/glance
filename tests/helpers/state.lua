@@ -88,6 +88,7 @@ function M.reset()
     filetree.repo_refresh_generation = 0
     filetree.repo_refresh_options = nil
     filetree.repo_head_oid = nil
+    filetree.repo_root = nil
     filetree.repo_snapshot_key = ''
     filetree.repo_status_output = ''
     filetree.repo_poll_timer = nil

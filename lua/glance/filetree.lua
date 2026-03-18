@@ -19,6 +19,7 @@ M.repo_refresh_inflight = false
 M.repo_refresh_generation = 0
 M.repo_refresh_options = nil
 M.repo_head_oid = nil
+M.repo_root = nil
 M.repo_snapshot_key = ''
 M.repo_status_output = ''
 M.repo_poll_timer = nil
@@ -35,6 +36,15 @@ end
 
 local function watch_options()
   return config.options.watch
+end
+
+local function repo_poll_enabled()
+  return watch_options().enabled
+    and watch_options().poll
+end
+
+local function repo_fs_watch_enabled()
+  return watch_options().enabled
 end
 
 local function apply_window_options(win)
@@ -221,7 +231,7 @@ local function repo_poll_backoff_exhausted()
 end
 
 local function schedule_repo_poll(reset_backoff)
-  if not watch_options().enabled then
+  if not repo_poll_enabled() then
     stop_repo_poll()
     reset_repo_poll_backoff()
     return
@@ -246,12 +256,12 @@ local function schedule_repo_poll(reset_backoff)
   end)
 
   local ok = pcall(function()
-    M.repo_poll_timer:start(delay, 0, vim.schedule_wrap(function()
-      if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+    M.repo_poll_timer:start(delay, 0, function()
+      if not M.buf then
         return
       end
       M.schedule_repo_refresh({ source = 'poll' })
-    end))
+    end)
   end)
 
   if not ok then
@@ -270,7 +280,7 @@ local function stop_repo_watchers()
 end
 
 local function finalize_repo_poll(changed, opts)
-  if not watch_options().enabled then
+  if not repo_poll_enabled() then
     stop_repo_poll()
     reset_repo_poll_backoff()
     return
@@ -613,7 +623,7 @@ local function sync_repo_watchers()
   local git = require('glance.git')
   local paths = {}
   local signature = ''
-  local watch_enabled = watch_options().enabled
+  local watch_enabled = repo_fs_watch_enabled()
 
   if watch_enabled then
     paths = git.repo_watch_paths()
@@ -731,6 +741,52 @@ function M.schedule_repo_refresh(opts)
     return
   end
 
+  if pending_opts.source == 'poll'
+    and not pending_opts.reset_poll
+    and not pending_opts.resync_watchers
+  then
+    local refresh_generation = M.repo_refresh_generation
+    M.repo_refresh_options = nil
+    M.repo_refresh_inflight = true
+
+    require('glance.git').get_status_snapshot_async(function(snapshot)
+      if refresh_generation ~= M.repo_refresh_generation then
+        M.repo_refresh_inflight = false
+        return
+      end
+
+      if (snapshot.key or '') == M.repo_snapshot_key then
+        M.repo_refresh_inflight = false
+        finalize_repo_poll(false, pending_opts)
+        if M.repo_refresh_options ~= nil then
+          M.schedule_repo_refresh()
+        end
+        return
+      end
+
+      vim.schedule(function()
+        if refresh_generation ~= M.repo_refresh_generation then
+          M.repo_refresh_inflight = false
+          return
+        end
+        if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+          M.repo_refresh_inflight = false
+          return
+        end
+
+        M.repo_refresh_inflight = false
+        M.handle_repo_status_change(snapshot, pending_opts)
+        if M.repo_refresh_options ~= nil then
+          M.schedule_repo_refresh()
+        end
+      end)
+    end, {
+      root = M.repo_root,
+      schedule_callback = false,
+    })
+    return
+  end
+
   M.repo_refresh_pending = true
   vim.schedule(function()
     M.repo_refresh_pending = false
@@ -764,6 +820,7 @@ function M.schedule_repo_refresh(opts)
 end
 
 function M.start_repo_watch()
+  M.repo_root = require('glance.git').repo_root()
   sync_repo_watchers()
   schedule_repo_poll(true)
 end

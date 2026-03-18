@@ -221,6 +221,11 @@ return {
       name = 'repo watch polling surfaces newly created untracked files while Glance is open',
       run = function()
         N.with_repo('repo_modified', function(repo)
+          require('glance').setup({
+            watch = {
+              poll = true,
+            },
+          })
           require('glance').start()
           local filetree = require('glance.filetree')
 

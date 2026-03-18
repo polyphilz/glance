@@ -58,6 +58,9 @@ function M.start()
   local ui = require('glance.ui')
   local filetree = require('glance.filetree')
   local app = config.options.app
+  local repo_poll_enabled = config.options.watch.enabled and config.options.watch.poll
+  local repo_fs_watch_enabled = config.options.watch.enabled
+  local watch_enabled = repo_poll_enabled or repo_fs_watch_enabled
 
   -- Verify we're in a git repo
   if not git.is_repo() then
@@ -77,7 +80,7 @@ function M.start()
   end
 
   -- Auto-detect external file changes (e.g. edits from Cursor/VS Code)
-  setup_app_autocmds(app, config.options.watch.enabled)
+  setup_app_autocmds(app, watch_enabled)
   apply_colorscheme(app.colorscheme)
 
   -- Apply highlights AFTER colorscheme so they aren't overwritten
@@ -101,7 +104,9 @@ function M.start()
   -- Set up the UI and render file tree
   ui.setup_layout()
   filetree.apply_status_snapshot(snapshot)
-  filetree.start_repo_watch()
+  if watch_enabled then
+    filetree.start_repo_watch()
+  end
 end
 
 function M.setup_highlights()

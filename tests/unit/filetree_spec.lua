@@ -189,6 +189,7 @@ return {
         config.setup({
           watch = {
             enabled = true,
+            poll = true,
             interval_ms = 200,
           },
         })
@@ -288,6 +289,7 @@ return {
         config.setup({
           watch = {
             enabled = true,
+            poll = true,
             interval_ms = 200,
           },
         })

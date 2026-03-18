@@ -27,6 +27,9 @@ local DISCARDABLE_KINDS = {
   untracked = true,
 }
 
+M._repo_root = nil
+M._repo_root_cwd = nil
+
 local function empty_files()
   return { staged = {}, changes = {}, untracked = {}, conflicts = {} }
 end
@@ -47,24 +50,32 @@ end
 local function run_git_capture_at_root_async(root, args, opts, callback)
   local cmd = { 'git', '-C', root }
   vim.list_extend(cmd, args)
+  local schedule_callback = opts == nil or opts.schedule_callback ~= false
 
   vim.system(cmd, { text = true }, function(result)
     local output = result.stdout or ''
     local allowed_codes = (opts and opts.allowed_codes) or { 0 }
+    local function deliver(...)
+      if schedule_callback then
+        local argv = { ... }
+        vim.schedule(function()
+          callback(unpack(argv))
+        end)
+        return
+      end
+      callback(...)
+    end
+
     if not vim.tbl_contains(allowed_codes, result.code) then
       local message = vim.trim(output ~= '' and output or (result.stderr or ''))
       if message == '' then
         message = 'git command failed'
       end
-      vim.schedule(function()
-        callback(false, message)
-      end)
+      deliver(false, message)
       return
     end
 
-    vim.schedule(function()
-      callback(true, output)
-    end)
+    deliver(true, output)
   end)
 end
 
@@ -116,7 +127,17 @@ end
 
 --- Get the root path of the git repository.
 function M.repo_root()
-  return repo_root_command_output()
+  local cwd = vim.uv.cwd()
+  if M._repo_root
+    and M._repo_root ~= ''
+    and M._repo_root_cwd == cwd
+  then
+    return M._repo_root
+  end
+
+  M._repo_root_cwd = cwd
+  M._repo_root = repo_root_command_output()
+  return M._repo_root
 end
 
 local function entry_is_untracked(entry)
@@ -329,16 +350,23 @@ function M.get_status_snapshot()
   return build_status_snapshot(output, M.head_oid())
 end
 
-function M.get_status_snapshot_async(callback)
-  local root = M.repo_root()
+function M.get_status_snapshot_async(callback, opts)
+  opts = opts or {}
+  local root = opts.root or M.repo_root()
   if not root then
-    vim.schedule(function()
+    if opts.schedule_callback == false then
       callback(empty_snapshot())
-    end)
+    else
+      vim.schedule(function()
+        callback(empty_snapshot())
+      end)
+    end
     return
   end
 
-  run_git_capture_at_root_async(root, { 'status', '--porcelain=v1', '--untracked-files=all' }, nil, function(ok, output)
+  run_git_capture_at_root_async(root, { 'status', '--porcelain=v1', '--untracked-files=all' }, {
+    schedule_callback = opts.schedule_callback,
+  }, function(ok, output)
     if not ok then
       callback(empty_snapshot())
       return
@@ -346,6 +374,7 @@ function M.get_status_snapshot_async(callback)
 
     run_git_capture_at_root_async(root, { 'rev-parse', '--verify', '-q', 'HEAD' }, {
       allowed_codes = { 0, 1 },
+      schedule_callback = opts.schedule_callback,
     }, function(head_ok, head_output)
       local head_oid = nil
       if head_ok then
