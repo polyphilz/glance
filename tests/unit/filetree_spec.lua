@@ -1,4 +1,5 @@
 local A = require('tests.helpers.assert')
+local N = require('tests.helpers.nvim')
 
 local function setup_filetree()
   local filetree = require('glance.filetree')
@@ -7,6 +8,21 @@ local function setup_filetree()
   vim.api.nvim_win_set_buf(win, buf)
   filetree.win = win
   return filetree
+end
+
+local function snapshot(files, opts)
+  opts = opts or {}
+  return {
+    head_oid = opts.head_oid,
+    key = opts.key or '',
+    output = opts.output or '',
+    files = files or {
+      conflicts = {},
+      staged = {},
+      changes = {},
+      untracked = {},
+    },
+  }
 end
 
 return {
@@ -177,258 +193,173 @@ return {
       end,
     },
     {
-      name = 'repo polling backs off when idle and resets after activity',
+      name = 'staged diff refreshes in place when only HEAD changes',
       run = function()
-        local config = require('glance.config')
-        local git = require('glance.git')
-        local original_new_timer = vim.uv.new_timer
-        local original_new_fs_poll = vim.uv.new_fs_poll
-        local original_repo_watch_paths = git.repo_watch_paths
-        local timer
-
-        config.setup({
-          watch = {
-            enabled = true,
-            poll = true,
-            interval_ms = 200,
-          },
-        })
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_refresh = diffview.refresh
+        local refreshed
 
         local ok, err = xpcall(function()
-          vim.uv.new_timer = function()
-            timer = {
-              starts = {},
-            }
-
-            function timer:start(delay, repeat_ms, callback)
-              self.starts[#self.starts + 1] = {
-                delay = delay,
-                repeat_ms = repeat_ms,
-              }
-              self.delay = delay
-              self.repeat_ms = repeat_ms
-              self.callback = callback
-            end
-
-            function timer:stop()
-            end
-
-            function timer:close()
-            end
-
-            return timer
-          end
-
-          vim.uv.new_fs_poll = function()
-            return nil
-          end
-
-          git.repo_watch_paths = function()
-            return {}
+          diffview.refresh = function(file)
+            refreshed = file
           end
 
           local filetree = setup_filetree()
-          filetree.start_repo_watch()
-          A.equal(filetree.repo_poll_delay_ms, 250)
-          A.equal(filetree.repo_poll_backoff_index, 1)
-
-          local snapshot = {
-            output = '',
-            files = {
-              conflicts = {},
-              staged = {},
-              changes = {},
-              untracked = {},
-            },
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = 'M ',
+            section = 'staged',
           }
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(filetree.repo_poll_delay_ms, 500)
-          A.equal(filetree.repo_poll_backoff_index, 2)
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(filetree.repo_poll_delay_ms, 1000)
-          A.equal(filetree.repo_poll_backoff_index, 3)
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(filetree.repo_poll_delay_ms, 2000)
-          A.equal(filetree.repo_poll_backoff_index, 4)
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(filetree.repo_poll_delay_ms, 3000)
-          A.equal(filetree.repo_poll_backoff_index, 5)
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(filetree.repo_poll_timer, nil)
-          A.equal(filetree.repo_poll_delay_ms, nil)
-
-          filetree.note_repo_activity()
-          A.equal(filetree.repo_poll_delay_ms, 250)
-          A.equal(filetree.repo_poll_backoff_index, 1)
-        end, debug.traceback)
-
-        git.repo_watch_paths = original_repo_watch_paths
-        vim.uv.new_fs_poll = original_new_fs_poll
-        vim.uv.new_timer = original_new_timer
-
-        if not ok then
-          error(err)
-        end
-      end,
-    },
-    {
-      name = 'unchanged poll ticks skip watcher resync until explicitly requested',
-      run = function()
-        local config = require('glance.config')
-        local git = require('glance.git')
-        local original_new_timer = vim.uv.new_timer
-        local original_new_fs_poll = vim.uv.new_fs_poll
-        local original_repo_watch_paths = git.repo_watch_paths
-        local repo_watch_path_calls = 0
-
-        config.setup({
-          watch = {
-            enabled = true,
-            poll = true,
-            interval_ms = 200,
-          },
-        })
-
-        local ok, err = xpcall(function()
-          vim.uv.new_timer = function()
-            local timer = {}
-
-            function timer:start()
-            end
-
-            function timer:stop()
-            end
-
-            function timer:close()
-            end
-
-            return timer
-          end
-
-          vim.uv.new_fs_poll = function()
-            return nil
-          end
-
-          git.repo_watch_paths = function()
-            repo_watch_path_calls = repo_watch_path_calls + 1
-            return {}
-          end
-
-          local filetree = setup_filetree()
-          filetree.start_repo_watch()
-          A.equal(repo_watch_path_calls, 1)
-
-          local snapshot = {
-            output = '',
-            files = {
-              conflicts = {},
-              staged = {},
-              changes = {},
-              untracked = {},
-            },
-          }
-
-          filetree.handle_repo_status_change(snapshot, { source = 'poll' })
-          A.equal(repo_watch_path_calls, 1)
-
-          filetree.handle_repo_status_change(snapshot, {
-            source = 'focus',
-            reset_poll = true,
-            resync_watchers = true,
-          })
-          A.equal(repo_watch_path_calls, 2)
-        end, debug.traceback)
-
-        git.repo_watch_paths = original_repo_watch_paths
-        vim.uv.new_fs_poll = original_new_fs_poll
-        vim.uv.new_timer = original_new_timer
-
-        if not ok then
-          error(err)
-        end
-      end,
-    },
-    {
-      name = 'scheduled repo refreshes fetch snapshots asynchronously and coalesce in flight requests',
-      run = function()
-        local git = require('glance.git')
-        local filetree = setup_filetree()
-        local original_async_snapshot = git.get_status_snapshot_async
-        local original_handle = filetree.handle_repo_status_change
-        local callbacks = {}
-        local fetches = 0
-        local handled = {}
-
-        local ok, err = xpcall(function()
-          git.get_status_snapshot_async = function(callback)
-            fetches = fetches + 1
-            callbacks[#callbacks + 1] = callback
-          end
-
-          filetree.handle_repo_status_change = function(snapshot, opts)
-            handled[#handled + 1] = {
-              snapshot = snapshot,
-              opts = vim.deepcopy(opts),
-            }
-          end
-
-          filetree.schedule_repo_refresh({ source = 'poll' })
-          vim.wait(100, function()
-            return fetches == 1
-          end)
-          A.equal(fetches, 1)
-
-          filetree.schedule_repo_refresh({
-            source = 'watch',
-            reset_poll = true,
-            resync_watchers = true,
-          })
-          vim.wait(20)
-          A.equal(fetches, 1)
-
-          callbacks[1]({
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = { before },
+            changes = {},
+            untracked = {},
+          }, {
+            head_oid = 'head-1',
             key = 'first',
-            output = '',
-            files = {
-              conflicts = {},
-              staged = {},
-              changes = {},
-              untracked = {},
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {
+              {
+                path = 'tracked.txt',
+                status = 'M',
+                raw_status = 'M ',
+                section = 'staged',
+              },
             },
-          })
-
-          vim.wait(100, function()
-            return fetches == 2 and #handled == 1
-          end)
-          A.equal(fetches, 2)
-          A.equal(handled[1].opts.source, 'poll')
-
-          callbacks[2]({
+            changes = {},
+            untracked = {},
+          }, {
+            head_oid = 'head-2',
             key = 'second',
-            output = '',
-            files = {
-              conflicts = {},
-              staged = {},
-              changes = {},
-              untracked = {},
-            },
-          })
+          }))
 
-          vim.wait(100, function()
-            return #handled == 2
-          end)
-          A.equal(handled[2].opts.source, 'watch')
-          A.truthy(handled[2].opts.reset_poll)
-          A.truthy(handled[2].opts.resync_watchers)
+          A.equal(refreshed.path, 'tracked.txt')
+          A.equal(refreshed.section, 'staged')
         end, debug.traceback)
 
-        filetree.handle_repo_status_change = original_handle
-        git.get_status_snapshot_async = original_async_snapshot
+        diffview.refresh = original_refresh
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'stale diff closes when the active file disappears and the buffer is clean',
+      run = function()
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_close = diffview.close
+        local close_called
+
+        local ok, err = xpcall(function()
+          diffview.close = function(force)
+            close_called = force
+          end
+
+          local filetree = setup_filetree()
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = ' M',
+            section = 'changes',
+          }
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = { before },
+            untracked = {},
+          }, {
+            key = 'first',
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+          diffview.new_buf = vim.api.nvim_create_buf(true, false)
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = {},
+            untracked = {},
+          }, {
+            key = 'second',
+          }))
+
+          A.equal(close_called, false)
+        end, debug.traceback)
+
+        diffview.close = original_close
+        diffview.new_buf = nil
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'stale diff stays open when the active buffer has unsaved edits',
+      run = function()
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local original_close = diffview.close
+        local messages, restore = N.capture_notifications()
+        local close_called = false
+
+        local ok, err = xpcall(function()
+          diffview.close = function()
+            close_called = true
+          end
+
+          local filetree = setup_filetree()
+          local before = {
+            path = 'tracked.txt',
+            status = 'M',
+            raw_status = ' M',
+            section = 'changes',
+          }
+          filetree.apply_status_snapshot(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = { before },
+            untracked = {},
+          }, {
+            key = 'first',
+          }))
+          filetree.active_file = before
+          ui.diff_open = true
+
+          diffview.new_buf = vim.api.nvim_create_buf(true, false)
+          vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, { 'unsaved edit' })
+
+          filetree.handle_repo_status_change(snapshot({
+            conflicts = {},
+            staged = {},
+            changes = {},
+            untracked = {},
+          }, {
+            key = 'second',
+          }))
+
+          A.falsy(close_called)
+          A.equal(filetree.active_file, nil)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+          A.contains(messages[1].msg, 'keeping the current buffer open because it has unsaved edits')
+        end, debug.traceback)
+
+        restore()
+        diffview.close = original_close
+        diffview.new_buf = nil
+        ui.diff_open = false
 
         if not ok then
           error(err)

@@ -37,6 +37,7 @@ function M.reset()
   local diffview = loaded['glance.diffview']
   local filetree = loaded['glance.filetree']
   local minimap = loaded['glance.minimap']
+  local repo_sync = loaded['glance.repo_sync']
   local ui = loaded['glance.ui']
 
   if diffview and diffview.stop_watching then
@@ -44,6 +45,9 @@ function M.reset()
   end
   if filetree and filetree.stop_repo_watch then
     pcall(filetree.stop_repo_watch)
+  end
+  if repo_sync and repo_sync.stop then
+    pcall(repo_sync.stop)
   end
 
   clear_group(diffview and diffview.autocmd_group)
@@ -81,19 +85,9 @@ function M.reset()
     filetree.active_file = nil
     filetree.selected_line = nil
     filetree.last_cursor_line = nil
-    filetree.repo_watchers = {}
-    filetree.repo_watch_signature = nil
-    filetree.repo_refresh_pending = false
-    filetree.repo_refresh_inflight = false
-    filetree.repo_refresh_generation = 0
-    filetree.repo_refresh_options = nil
     filetree.repo_head_oid = nil
-    filetree.repo_root = nil
     filetree.repo_snapshot_key = ''
     filetree.repo_status_output = ''
-    filetree.repo_poll_timer = nil
-    filetree.repo_poll_backoff_index = 1
-    filetree.repo_poll_delay_ms = nil
   end
 
   if minimap then

@@ -379,8 +379,6 @@ return {
           A.equal(vim.api.nvim_get_option_value('cursorline', { win = diffview.new_win }), true)
           A.equal(vim.api.nvim_get_option_value('foldenable', { win = diffview.new_win }), true)
           A.equal(diffview.fs_watcher, nil)
-          A.equal(#filetree.repo_watchers, 0)
-          A.equal(filetree.repo_poll_timer, nil)
         end)
       end,
     },
