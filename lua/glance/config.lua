@@ -74,7 +74,6 @@ local ALLOWED_THEME_PALETTE = {
 local ALLOWED_WINDOWS = {
   filetree = true,
   diff = true,
-  welcome = true,
 }
 
 local ALLOWED_FILETREE = {
@@ -96,13 +95,6 @@ local ALLOWED_DIFF_WINDOW = {
   signcolumn = true,
   cursorline = true,
   foldenable = true,
-}
-
-local ALLOWED_WELCOME_WINDOW = {
-  number = true,
-  relativenumber = true,
-  signcolumn = true,
-  cursorline = true,
 }
 
 local ALLOWED_KEYMAPS = {
@@ -141,7 +133,6 @@ local ALLOWED_SIGNS = {
 
 local ALLOWED_WELCOME = {
   animate = true,
-  frame_ms = true,
 }
 
 local ALLOWED_MINIMAP = {
@@ -189,12 +180,6 @@ local BASE_DEFAULTS = {
       cursorline = false,
       foldenable = false,
     },
-    welcome = {
-      number = false,
-      relativenumber = false,
-      signcolumn = 'no',
-      cursorline = false,
-    },
   },
   filetree = {
     show_legend = true,
@@ -223,7 +208,6 @@ local BASE_DEFAULTS = {
   },
   welcome = {
     animate = true,
-    frame_ms = 150,
   },
   minimap = {
     enabled = true,
@@ -361,7 +345,6 @@ local function validate_windows(options)
   validate_window_options('windows.diff', diff, ALLOWED_DIFF_WINDOW)
   validate_boolean(diff.foldenable, 'windows.diff.foldenable')
 
-  validate_window_options('windows.welcome', windows.welcome, ALLOWED_WELCOME_WINDOW)
 end
 
 local function validate_filetree(options)
@@ -450,7 +433,6 @@ local function validate_welcome(options)
   local welcome = options.welcome
   validate_known_keys(welcome, ALLOWED_WELCOME, 'welcome')
   validate_boolean(welcome.animate, 'welcome.animate')
-  validate_integer(welcome.frame_ms, 'welcome.frame_ms', 0)
 end
 
 local function validate_minimap(options)

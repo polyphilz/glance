@@ -4,6 +4,7 @@ local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 local SEPARATOR_HL = 'GlanceSeparatorHover'
+local WELCOME_FRAME_MS = 150
 
 local ns = vim.api.nvim_create_namespace('glance_welcome')
 local LOGO_TEXT = 'glance'
@@ -67,10 +68,6 @@ end
 
 local function filetree_options()
   return config.options.windows.filetree
-end
-
-local function welcome_options()
-  return config.options.windows.welcome
 end
 
 local function welcome_config()
@@ -344,8 +341,7 @@ local function start_welcome_animation()
     return
   end
 
-  local frame_ms = welcome_config().frame_ms
-  M.welcome_timer:start(frame_ms, frame_ms, vim.schedule_wrap(function()
+  M.welcome_timer:start(WELCOME_FRAME_MS, WELCOME_FRAME_MS, vim.schedule_wrap(function()
     if not M.welcome_buf or not vim.api.nvim_buf_is_valid(M.welcome_buf) then
       stop_welcome_animation()
       return
@@ -376,8 +372,10 @@ function M.show_welcome()
     vim.api.nvim_buf_delete(scratch_buf, { force = true })
   end
 
-  -- Window options
-  apply_window_options(M.welcome_win, welcome_options())
+  vim.api.nvim_win_set_option(M.welcome_win, 'number', false)
+  vim.api.nvim_win_set_option(M.welcome_win, 'relativenumber', false)
+  vim.api.nvim_win_set_option(M.welcome_win, 'signcolumn', 'no')
+  vim.api.nvim_win_set_option(M.welcome_win, 'cursorline', false)
 
   -- Constrain filetree to its fixed width after the split
   vim.api.nvim_win_set_width(filetree.win, filetree_options().width)

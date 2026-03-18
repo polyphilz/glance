@@ -69,12 +69,6 @@ return {
               cursorline = false,
               foldenable = false,
             },
-            welcome = {
-              number = false,
-              relativenumber = false,
-              signcolumn = 'no',
-              cursorline = false,
-            },
           },
           filetree = {
             show_legend = true,
@@ -103,7 +97,6 @@ return {
           },
           welcome = {
             animate = true,
-            frame_ms = 150,
           },
           minimap = {
             enabled = true,
@@ -219,6 +212,40 @@ return {
         A.equal(config.options.signs.copied, 'C')
         A.equal(config.options.signs.conflicted, 'U')
         A.equal(config.options.signs.untracked, '?')
+      end,
+    },
+    {
+      name = 'removed welcome window config is rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            windows = {
+              welcome = {
+                number = true,
+              },
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'unknown config key windows%.welcome')
+      end,
+    },
+    {
+      name = 'removed welcome frame timing option is rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            welcome = {
+              frame_ms = 300,
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'unknown config key welcome%.frame_ms')
       end,
     },
     {

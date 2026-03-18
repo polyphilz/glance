@@ -259,7 +259,7 @@ Notes:
 
 - Top-level flat keys like `hide_statusline = true` are not supported. Use the nested schema.
 - `theme.preset` selects a built-in palette, and `theme.palette` can override individual colors on top of that preset.
-- The welcome screen is always part of startup. `welcome` only controls its animation timing.
+- `welcome.animate` controls whether the welcome screen animation runs.
 - `watch.enabled` keeps `.git` metadata watchers on. `watch.poll` controls background worktree polling for new untracked/external file changes.
 - Discard actions always prompt for confirmation before changing the repo state.
 
