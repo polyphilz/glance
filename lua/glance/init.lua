@@ -25,7 +25,12 @@ local function setup_app_autocmds(app, watch_enabled)
   vim.api.nvim_clear_autocmds({ group = APP_AUGROUP })
 
   if app.checktime then
-    vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter' }, {
+    local checktime_events = { 'FocusGained', 'BufEnter' }
+    if not watch_enabled then
+      checktime_events[#checktime_events + 1] = 'CursorHold'
+    end
+
+    vim.api.nvim_create_autocmd(checktime_events, {
       group = APP_AUGROUP,
       command = 'silent! checktime',
     })

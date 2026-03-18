@@ -417,6 +417,45 @@ return {
       end,
     },
     {
+      name = 'watch disabled registers CursorHold checktime for in-place reloads',
+      run = function()
+        N.with_repo('repo_modified', function(repo)
+          require('glance').setup({
+            app = {
+              checktime = true,
+            },
+            watch = {
+              enabled = false,
+            },
+          })
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          local diffview = require('glance.diffview')
+
+          A.equal(diffview.fs_watcher, nil)
+
+          local app_autocmds = vim.api.nvim_get_autocmds({
+            group = 'GlanceApp',
+            event = 'CursorHold',
+          })
+          A.truthy(#app_autocmds > 0)
+
+          repo:write(repo.files.tracked, 'external change via CursorHold\n')
+          vim.wait(1100)
+          vim.api.nvim_set_current_win(diffview.new_win)
+          vim.cmd('silent! checktime')
+
+          N.wait(500, function()
+            local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
+            return lines[1] == 'external change via CursorHold'
+          end)
+        end)
+      end,
+    },
+    {
       name = 'save refreshes disk and minimap and watcher reloads external edits',
       run = function()
         N.with_repo('repo_modified', function(repo)
