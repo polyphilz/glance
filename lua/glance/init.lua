@@ -98,14 +98,6 @@ function M.start()
   local snapshot = git.get_status_snapshot()
   local files = snapshot.files
 
-  -- Check for empty state
-  local total = #files.conflicts + #files.staged + #files.changes + #files.untracked
-  if total == 0 then
-    vim.notify('glance: no changes found', vim.log.levels.INFO)
-    vim.cmd('qa!')
-    return
-  end
-
   -- Set up the UI and render file tree
   ui.setup_layout()
   filetree.apply_status_snapshot(snapshot)

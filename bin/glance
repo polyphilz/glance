@@ -77,13 +77,6 @@ EOF
   fi
 }
 
-repo_has_changes() {
-  local status_output=""
-
-  status_output="$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)" || return 1
-  [ -n "$status_output" ]
-}
-
 config_path() {
   if [ -n "${GLANCE_CONFIG:-}" ]; then
     printf '%s\n' "$GLANCE_CONFIG"
@@ -205,11 +198,6 @@ require_command "git" "git is required but was not found on PATH"
 # Verify we're inside a git repository
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   fail "not a git repository"
-fi
-
-if ! repo_has_changes; then
-  info "no changes found"
-  exit 0
 fi
 
 require_supported_nvim

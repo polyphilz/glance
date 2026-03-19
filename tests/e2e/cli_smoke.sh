@@ -90,9 +90,18 @@ echo "pending" >"$TMP_DIR/dirty-repo/pending.txt"
 
 (
   cd "$TMP_DIR/clean-repo"
-  env PATH="$TMP_DIR/git-only-bin" "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/clean-repo.out" 2>"$TMP_DIR/clean-repo.err"
+  env \
+    PATH="$TMP_DIR/bin:$PATH" \
+    GLANCE_CAPTURE="$TMP_DIR/clean-nvim.args" \
+    GLANCE_ROOT_CAPTURE="$TMP_DIR/clean-glance-root.txt" \
+    "$BASH_BIN" "$ROOT/bin/glance" >"$TMP_DIR/clean-repo.out" 2>"$TMP_DIR/clean-repo.err"
 )
-grep -F "glance: no changes found" "$TMP_DIR/clean-repo.err" >/dev/null
+grep -Fx -- "--clean" "$TMP_DIR/clean-nvim.args" >/dev/null
+grep -Fx -- "-c" "$TMP_DIR/clean-nvim.args" >/dev/null
+grep -Fx -- "lua require('glance.bootstrap').run()" "$TMP_DIR/clean-nvim.args" >/dev/null
+grep -Fx -- "--cmd" "$TMP_DIR/clean-nvim.args" >/dev/null
+grep -Fx -- "lua vim.opt.runtimepath:append(vim.env.GLANCE_ROOT)" "$TMP_DIR/clean-nvim.args" >/dev/null
+grep -Fx -- "$ROOT" "$TMP_DIR/clean-glance-root.txt" >/dev/null
 
 (
   cd "$TMP_DIR/dirty-repo"

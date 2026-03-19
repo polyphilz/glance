@@ -43,7 +43,7 @@ return {
       end,
     },
     {
-      name = 'startup in a clean repo hits the no changes path',
+      name = 'startup in a clean repo shows the empty state layout',
       run = function()
         N.with_repo('repo_no_changes', function()
           local messages, restore = N.capture_notifications()
@@ -52,9 +52,15 @@ return {
           end)
           restore()
 
-          A.equal(messages[1].msg, 'glance: no changes found')
-          A.equal(messages[1].level, vim.log.levels.INFO)
-          A.length(quits, 1)
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
+
+          A.same(messages, {})
+          A.length(quits, 0)
+          A.truthy(filetree.win and vim.api.nvim_win_is_valid(filetree.win))
+          A.truthy(ui.welcome_win and vim.api.nvim_win_is_valid(ui.welcome_win))
+          A.equal(lines[#lines], '  No changes found')
         end)
       end,
     },
