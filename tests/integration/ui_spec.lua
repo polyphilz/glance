@@ -214,6 +214,8 @@ return {
           local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
           A.truthy(ui.welcome_win and vim.api.nvim_win_is_valid(ui.welcome_win))
           A.equal(lines[#lines], '  No changes found')
+          A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+          A.same(vim.api.nvim_win_get_cursor(filetree.win), { #lines, 4 })
         end)
       end,
     },

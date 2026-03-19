@@ -151,6 +151,29 @@ return {
           '  No changes found',
         })
         A.equal(filetree.get_selected_file(), nil)
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+        A.same(vim.api.nvim_win_get_cursor(filetree.win), { 5, 4 })
+      end,
+    },
+    {
+      name = 'render restores cursorline when files return',
+      run = function()
+        local filetree = setup_filetree()
+
+        filetree.render({
+          staged = {},
+          changes = {},
+          untracked = {},
+        })
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+
+        filetree.render({
+          changes = {
+            { path = 'changed.txt', status = 'M', section = 'changes' },
+          },
+        })
+
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), true)
       end,
     },
     {

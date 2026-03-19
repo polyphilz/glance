@@ -75,6 +75,28 @@ local function files_empty(files)
     and #(files.untracked or {}) == 0
 end
 
+local function sync_cursorline()
+  if not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return
+  end
+
+  vim.api.nvim_win_set_option(M.win, 'cursorline', filetree_options().cursorline and not files_empty(M.files))
+end
+
+local function place_empty_state_cursor()
+  if not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return
+  end
+
+  local line_count = vim.api.nvim_buf_line_count(M.buf)
+  if line_count == 0 then
+    return
+  end
+
+  local line = vim.api.nvim_buf_get_lines(M.buf, line_count - 1, line_count, false)[1] or ''
+  vim.api.nvim_win_set_cursor(M.win, { line_count, math.min(4, #line) })
+end
+
 local function same_file_identity(left, right)
   return type(left) == 'table'
     and type(right) == 'table'
@@ -124,6 +146,7 @@ local function restore_selection(saved_line)
   end
   if not M.get_selected_file() then
     M.selected_line = nil
+    place_empty_state_cursor()
   end
 end
 
@@ -293,6 +316,8 @@ function M.render(files)
     vim.api.nvim_buf_add_highlight(M.buf, FILETREE_NS, hl[4], hl[1] - 1, hl[2], hl[3])
   end
 
+  sync_cursorline()
+
   -- Place cursor on the first file entry
   M.move_to_first_file()
 end
@@ -421,6 +446,8 @@ function M.move_to_first_file()
       return
     end
   end
+
+  place_empty_state_cursor()
 end
 
 --- Highlight the currently active file (being viewed in diff).
@@ -568,6 +595,7 @@ function M.toggle()
 
     -- Reapply window options
     apply_window_options(M.win)
+    sync_cursorline()
     vim.api.nvim_win_set_width(M.win, filetree_options().width)
 
     diffview.equalize_panes()
