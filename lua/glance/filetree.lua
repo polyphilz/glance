@@ -60,9 +60,28 @@ local function add_highlight(highlights, line, col_start, col_end, group)
   highlights[#highlights + 1] = { line, col_start, col_end, group }
 end
 
+local function add_legend_key_highlights(highlights, line, text)
+  local start_col = 1
+
+  while true do
+    local bracket_start, bracket_end = text:find('%b[]', start_col)
+    if not bracket_start then
+      return
+    end
+
+    add_highlight(highlights, line, bracket_start - 1, bracket_start, 'GlanceLegendBracket')
+    if bracket_end > bracket_start + 1 then
+      add_highlight(highlights, line, bracket_start, bracket_end - 1, 'GlanceLegendKey')
+    end
+    add_highlight(highlights, line, bracket_end - 1, bracket_end, 'GlanceLegendBracket')
+
+    start_col = bracket_end + 1
+  end
+end
+
 local function legend_line_count()
   if filetree_config().show_legend then
-    return 4
+    return 6
   end
   return 0
 end
@@ -193,24 +212,27 @@ end
 
 local function add_legend(lines, highlights)
   local km = config.options.keymaps
-  local title = '  discard'
-  local actions = '  [' .. km.discard_file .. '] file   [' .. km.discard_all .. '] all'
-  local resize_hint = '  drag divider to resize'
+  local title = '  actions'
+  local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
+  local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
+  local discard_line = '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all'
+  local resize_hint = '  drag dividers to resize'
 
   lines[#lines + 1] = title
-  lines[#lines + 1] = actions
+  lines[#lines + 1] = stage_line
+  lines[#lines + 1] = unstage_line
+  lines[#lines + 1] = discard_line
   lines[#lines + 1] = resize_hint
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
-  add_highlight(highlights, 2, 0, #actions, 'GlanceLegendText')
-  add_highlight(highlights, 2, 2, 3, 'GlanceLegendBracket')
-  add_highlight(highlights, 2, 3, 4, 'GlanceLegendKey')
-  add_highlight(highlights, 2, 4, 5, 'GlanceLegendBracket')
-  add_highlight(highlights, 2, 13, 14, 'GlanceLegendBracket')
-  add_highlight(highlights, 2, 14, 15, 'GlanceLegendKey')
-  add_highlight(highlights, 2, 15, 16, 'GlanceLegendBracket')
-  add_highlight(highlights, 3, 0, #resize_hint, 'GlanceLegendHint')
+  add_highlight(highlights, 2, 0, #stage_line, 'GlanceLegendText')
+  add_highlight(highlights, 3, 0, #unstage_line, 'GlanceLegendText')
+  add_highlight(highlights, 4, 0, #discard_line, 'GlanceLegendText')
+  add_legend_key_highlights(highlights, 2, stage_line)
+  add_legend_key_highlights(highlights, 3, unstage_line)
+  add_legend_key_highlights(highlights, 4, discard_line)
+  add_highlight(highlights, 5, 0, #resize_hint, 'GlanceLegendHint')
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -613,6 +635,53 @@ local function confirm_action(message, accept_label)
   return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
 end
 
+local function active_diff_matches_file(file)
+  return type(file) == 'table'
+    and type(M.active_file) == 'table'
+    and M.active_file.path == file.path
+end
+
+local function close_active_diff_for_file(file)
+  local ui = require('glance.ui')
+  if not ui.diff_open or not active_diff_matches_file(file) then
+    return false
+  end
+
+  require('glance.diffview').close(true)
+  return true
+end
+
+local function close_any_active_diff()
+  local ui = require('glance.ui')
+  if not ui.diff_open then
+    return false
+  end
+
+  require('glance.diffview').close(true)
+  return true
+end
+
+local function notify_action_file_error(action, file, err, unsupported_message, invalid_target_message)
+  if err == unsupported_message or err == invalid_target_message then
+    vim.notify(err, vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify(
+    'glance: failed to ' .. action .. ' ' .. display_path(file) .. ': ' .. tostring(err),
+    vim.log.levels.ERROR
+  )
+end
+
+local function notify_action_all_error(action, err, unsupported_message)
+  if err == unsupported_message then
+    vim.notify(err, vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify('glance: failed to ' .. action .. ' all changes: ' .. tostring(err), vim.log.levels.ERROR)
+end
+
 local function notify_discard_file_error(file, err)
   local git = require('glance.git')
   if err == git.UNSUPPORTED_DISCARD_MESSAGE then
@@ -664,7 +733,7 @@ function M.discard_selected_file()
   local ui = require('glance.ui')
   local diffview = require('glance.diffview')
   local active_file = M.active_file
-  if ui.diff_open and active_file and active_file.path == file.path then
+  if ui.diff_open and active_file and active_diff_matches_file(file) then
     diffview.close(true)
     active_file = nil
   end
@@ -677,6 +746,80 @@ function M.discard_selected_file()
   end
 
   refresh_after_discard(active_file)
+end
+
+function M.stage_selected_file()
+  local file = M.get_selected_file()
+  if not file then
+    return
+  end
+
+  local git = require('glance.git')
+  local allowed, err = git.can_stage_file(file)
+  if not allowed then
+    notify_action_file_error(
+      'stage',
+      file,
+      err,
+      git.UNSUPPORTED_STAGE_MESSAGE,
+      git.INVALID_STAGE_TARGET_MESSAGE
+    )
+    return
+  end
+
+  close_active_diff_for_file(file)
+
+  local ok
+  ok, err = git.stage_file(file)
+  if not ok then
+    notify_action_file_error(
+      'stage',
+      file,
+      err,
+      git.UNSUPPORTED_STAGE_MESSAGE,
+      git.INVALID_STAGE_TARGET_MESSAGE
+    )
+    return
+  end
+
+  M.refresh()
+end
+
+function M.unstage_selected_file()
+  local file = M.get_selected_file()
+  if not file then
+    return
+  end
+
+  local git = require('glance.git')
+  local allowed, err = git.can_unstage_file(file)
+  if not allowed then
+    notify_action_file_error(
+      'unstage',
+      file,
+      err,
+      git.UNSUPPORTED_UNSTAGE_MESSAGE,
+      git.INVALID_UNSTAGE_TARGET_MESSAGE
+    )
+    return
+  end
+
+  close_active_diff_for_file(file)
+
+  local ok
+  ok, err = git.unstage_file(file)
+  if not ok then
+    notify_action_file_error(
+      'unstage',
+      file,
+      err,
+      git.UNSUPPORTED_UNSTAGE_MESSAGE,
+      git.INVALID_UNSTAGE_TARGET_MESSAGE
+    )
+    return
+  end
+
+  M.refresh()
 end
 
 function M.discard_all()
@@ -709,6 +852,46 @@ function M.discard_all()
   M.refresh()
 end
 
+function M.stage_all()
+  local git = require('glance.git')
+  local allowed, err = git.can_stage_all(M.files)
+  if not allowed then
+    notify_action_all_error('stage', err, git.UNSUPPORTED_STAGE_MESSAGE)
+    return
+  end
+
+  close_any_active_diff()
+
+  local ok
+  ok, err = git.stage_all(M.files)
+  if not ok then
+    notify_action_all_error('stage', err, git.UNSUPPORTED_STAGE_MESSAGE)
+    return
+  end
+
+  M.refresh()
+end
+
+function M.unstage_all()
+  local git = require('glance.git')
+  local allowed, err = git.can_unstage_all(M.files)
+  if not allowed then
+    notify_action_all_error('unstage', err, git.UNSUPPORTED_UNSTAGE_MESSAGE)
+    return
+  end
+
+  close_any_active_diff()
+
+  local ok
+  ok, err = git.unstage_all(M.files)
+  if not ok then
+    notify_action_all_error('unstage', err, git.UNSUPPORTED_UNSTAGE_MESSAGE)
+    return
+  end
+
+  M.refresh()
+end
+
 --- Set up buffer-local keymaps for the file tree.
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
@@ -723,6 +906,10 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)
   vim.keymap.set('n', km.refresh, function() M.refresh() end, opts)
   vim.keymap.set('n', km.toggle_filetree, function() M.toggle() end, opts)
+  vim.keymap.set('n', km.stage_file, function() M.stage_selected_file() end, opts)
+  vim.keymap.set('n', km.stage_all, function() M.stage_all() end, opts)
+  vim.keymap.set('n', km.unstage_file, function() M.unstage_selected_file() end, opts)
+  vim.keymap.set('n', km.unstage_all, function() M.unstage_all() end, opts)
   vim.keymap.set('n', km.discard_file, function() M.discard_selected_file() end, opts)
   vim.keymap.set('n', km.discard_all, function() M.discard_all() end, opts)
   vim.keymap.set('n', km.open_file, function()

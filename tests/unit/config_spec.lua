@@ -80,6 +80,10 @@ return {
             next_section = 'J',
             prev_section = 'K',
             toggle_filetree = '<Tab>',
+            stage_file = 's',
+            stage_all = 'S',
+            unstage_file = 'u',
+            unstage_all = 'U',
             discard_file = 'd',
             discard_all = 'D',
           },
@@ -146,7 +150,8 @@ return {
           },
           keymaps = {
             quit = 'x',
-            discard_file = 'x',
+            stage_file = 'g',
+            discard_file = 'z',
           },
           minimap = {
             enabled = false,
@@ -168,8 +173,12 @@ return {
         A.equal(config.options.pane_navigation.left, 'H')
         A.equal(config.options.pane_navigation.right, nil)
         A.equal(config.options.keymaps.quit, 'x')
+        A.equal(config.options.keymaps.stage_file, 'g')
+        A.equal(config.options.keymaps.stage_all, 'S')
+        A.equal(config.options.keymaps.unstage_file, 'u')
+        A.equal(config.options.keymaps.unstage_all, 'U')
         A.equal(config.options.keymaps.open_file, '<CR>')
-        A.equal(config.options.keymaps.discard_file, 'x')
+        A.equal(config.options.keymaps.discard_file, 'z')
         A.equal(config.options.keymaps.discard_all, 'D')
         A.equal(config.options.minimap.enabled, false)
         A.equal(config.options.watch.enabled, true)
@@ -419,20 +428,20 @@ return {
       end,
     },
     {
-      name = 'discard keymaps must be different',
+      name = 'duplicate action keymaps are rejected across the full keymap set',
       run = function()
         local config = require('glance.config')
         local ok, err = pcall(function()
           config.setup({
             keymaps = {
+              stage_file = 'd',
               discard_file = 'd',
-              discard_all = 'd',
             },
           })
         end)
 
         A.falsy(ok)
-        A.match(err, 'keymaps%.discard_file and keymaps%.discard_all must be different')
+        A.match(err, 'keymaps%.discard_file conflicts with keymaps%.stage_file')
       end,
     },
   },

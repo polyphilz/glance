@@ -45,9 +45,11 @@ return {
         })
 
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
-          '  discard',
-          '  [d] file   [D] all',
-          '  drag divider to resize',
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  drag dividers to resize',
           '',
           '  Staged Changes',
           '    M staged.txt',
@@ -58,7 +60,7 @@ return {
           '  Untracked',
           '    ? new.txt',
         })
-        A.equal(filetree.selected_line, 6)
+        A.equal(filetree.selected_line, 8)
       end,
     },
     {
@@ -75,9 +77,11 @@ return {
         })
 
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
-          '  discard',
-          '  [d] file   [D] all',
-          '  drag divider to resize',
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  drag dividers to resize',
           '',
           '  Conflicts',
           '    U conflict.txt',
@@ -85,7 +89,7 @@ return {
           '  Changes',
           '    T typed.txt',
         })
-        A.equal(filetree.selected_line, 6)
+        A.equal(filetree.selected_line, 8)
       end,
     },
     {
@@ -105,7 +109,7 @@ return {
           untracked = {},
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[6], '    R old/path.txt → new/path.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    R old/path.txt → new/path.txt')
       end,
     },
     {
@@ -129,8 +133,8 @@ return {
           },
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[6], '    ! conflict.txt')
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[9], '    > copied.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    ! conflict.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[11], '    > copied.txt')
       end,
     },
     {
@@ -144,15 +148,17 @@ return {
         })
 
         A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
-          '  discard',
-          '  [d] file   [D] all',
-          '  drag divider to resize',
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  drag dividers to resize',
           '',
           '  No changes found',
         })
         A.equal(filetree.get_selected_file(), nil)
         A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
-        A.same(vim.api.nvim_win_get_cursor(filetree.win), { 5, 4 })
+        A.same(vim.api.nvim_win_get_cursor(filetree.win), { 7, 4 })
       end,
     },
     {
@@ -213,6 +219,228 @@ return {
         A.equal(filetree.status_highlight('U'), 'GlanceStatusConflict')
         A.equal(filetree.status_highlight('?'), 'GlanceStatusU')
         A.equal(filetree.status_highlight('X'), nil)
+      end,
+    },
+    {
+      name = 'stage selected file calls git stage and refreshes',
+      run = function()
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local original_can_stage_file = git.can_stage_file
+        local original_stage_file = git.stage_file
+        local original_refresh = filetree.refresh
+        local validated, staged, refreshed
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            changes = {
+              { path = 'changed.txt', status = 'M', section = 'changes' },
+            },
+          })
+
+          git.can_stage_file = function(file)
+            validated = file
+            return true
+          end
+          git.stage_file = function(file)
+            staged = file
+            return true
+          end
+          filetree.refresh = function()
+            refreshed = true
+          end
+
+          filetree.stage_selected_file()
+
+          A.equal(validated.path, 'changed.txt')
+          A.equal(staged.path, 'changed.txt')
+          A.truthy(refreshed)
+        end, debug.traceback)
+
+        git.can_stage_file = original_can_stage_file
+        git.stage_file = original_stage_file
+        filetree.refresh = original_refresh
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'selected stage only closes the active diff when it targets the same path',
+      run = function()
+        local git = require('glance.git')
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local filetree = setup_filetree()
+        local original_can_stage_file = git.can_stage_file
+        local original_stage_file = git.stage_file
+        local original_refresh = filetree.refresh
+        local original_close = diffview.close
+        local close_calls = 0
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            changes = {
+              { path = 'changed.txt', status = 'M', section = 'changes' },
+            },
+          })
+
+          git.can_stage_file = function()
+            return true
+          end
+          git.stage_file = function()
+            return true
+          end
+          filetree.refresh = function() end
+          diffview.close = function(force)
+            close_calls = close_calls + (force and 1 or 0)
+          end
+
+          ui.diff_open = true
+          filetree.active_file = {
+            path = 'changed.txt',
+            section = 'changes',
+          }
+          filetree.stage_selected_file()
+          A.equal(close_calls, 1)
+
+          filetree.active_file = {
+            path = 'other.txt',
+            section = 'changes',
+          }
+          filetree.stage_selected_file()
+          A.equal(close_calls, 1)
+        end, debug.traceback)
+
+        git.can_stage_file = original_can_stage_file
+        git.stage_file = original_stage_file
+        filetree.refresh = original_refresh
+        diffview.close = original_close
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'unstage selected file warns on invalid targets without mutating or refreshing',
+      run = function()
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local original_can_unstage_file = git.can_unstage_file
+        local original_unstage_file = git.unstage_file
+        local original_refresh = filetree.refresh
+        local messages, restore = N.capture_notifications()
+        local unstage_called = false
+        local refresh_called = false
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            changes = {
+              { path = 'changed.txt', status = 'M', section = 'changes' },
+            },
+          })
+
+          git.can_unstage_file = function()
+            return false, git.INVALID_UNSTAGE_TARGET_MESSAGE
+          end
+          git.unstage_file = function()
+            unstage_called = true
+            return true
+          end
+          filetree.refresh = function()
+            refresh_called = true
+          end
+
+          filetree.unstage_selected_file()
+
+          A.falsy(unstage_called)
+          A.falsy(refresh_called)
+          A.equal(messages[1].msg, git.INVALID_UNSTAGE_TARGET_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+        end, debug.traceback)
+
+        restore()
+        git.can_unstage_file = original_can_unstage_file
+        git.unstage_file = original_unstage_file
+        filetree.refresh = original_refresh
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'repo-wide stage and unstage close any open diff and refresh',
+      run = function()
+        local git = require('glance.git')
+        local diffview = require('glance.diffview')
+        local ui = require('glance.ui')
+        local filetree = setup_filetree()
+        local original_can_stage_all = git.can_stage_all
+        local original_stage_all = git.stage_all
+        local original_can_unstage_all = git.can_unstage_all
+        local original_unstage_all = git.unstage_all
+        local original_refresh = filetree.refresh
+        local original_close = diffview.close
+        local stage_all_arg, unstage_all_arg
+        local refresh_calls = 0
+        local close_calls = 0
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+            changes = {
+              { path = 'changed.txt', status = 'M', section = 'changes' },
+            },
+          })
+
+          git.can_stage_all = function(files)
+            return true
+          end
+          git.stage_all = function(files)
+            stage_all_arg = files
+            return true
+          end
+          git.can_unstage_all = function(files)
+            return true
+          end
+          git.unstage_all = function(files)
+            unstage_all_arg = files
+            return true
+          end
+          filetree.refresh = function()
+            refresh_calls = refresh_calls + 1
+          end
+          diffview.close = function(force)
+            close_calls = close_calls + (force and 1 or 0)
+          end
+
+          ui.diff_open = true
+          filetree.stage_all()
+          filetree.unstage_all()
+
+          A.equal(stage_all_arg, filetree.files)
+          A.equal(unstage_all_arg, filetree.files)
+          A.equal(close_calls, 2)
+          A.equal(refresh_calls, 2)
+        end, debug.traceback)
+
+        git.can_stage_all = original_can_stage_all
+        git.stage_all = original_stage_all
+        git.can_unstage_all = original_can_unstage_all
+        git.unstage_all = original_unstage_all
+        filetree.refresh = original_refresh
+        diffview.close = original_close
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
       end,
     },
     {

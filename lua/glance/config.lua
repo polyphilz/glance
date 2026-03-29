@@ -104,8 +104,27 @@ local ALLOWED_KEYMAPS = {
   next_section = true,
   prev_section = true,
   toggle_filetree = true,
+  stage_file = true,
+  stage_all = true,
+  unstage_file = true,
+  unstage_all = true,
   discard_file = true,
   discard_all = true,
+}
+
+local KEYMAP_ORDER = {
+  'open_file',
+  'quit',
+  'refresh',
+  'next_section',
+  'prev_section',
+  'toggle_filetree',
+  'stage_file',
+  'stage_all',
+  'unstage_file',
+  'unstage_all',
+  'discard_file',
+  'discard_all',
 }
 
 local ALLOWED_PANE_NAVIGATION = {
@@ -113,6 +132,13 @@ local ALLOWED_PANE_NAVIGATION = {
   down = true,
   up = true,
   right = true,
+}
+
+local PANE_NAVIGATION_ORDER = {
+  'left',
+  'down',
+  'up',
+  'right',
 }
 
 local ALLOWED_HUNK_NAVIGATION = {
@@ -191,6 +217,10 @@ local BASE_DEFAULTS = {
     next_section = 'J',
     prev_section = 'K',
     toggle_filetree = '<Tab>',
+    stage_file = 's',
+    stage_all = 'S',
+    unstage_file = 'u',
+    unstage_all = 'U',
     discard_file = 'd',
     discard_all = 'D',
   },
@@ -355,12 +385,19 @@ end
 
 local function validate_keymaps(options)
   local keymaps = options.keymaps
+  local seen = {}
+
   validate_known_keys(keymaps, ALLOWED_KEYMAPS, 'keymaps')
   for key, value in pairs(keymaps) do
     validate_string(value, 'keymaps.' .. key)
   end
-  if keymaps.discard_file == keymaps.discard_all then
-    fail('keymaps.discard_file and keymaps.discard_all must be different')
+
+  for _, key in ipairs(KEYMAP_ORDER) do
+    local value = keymaps[key]
+    if seen[value] then
+      fail('keymaps.' .. key .. ' conflicts with keymaps.' .. seen[value])
+    end
+    seen[value] = key
   end
 end
 
@@ -370,7 +407,12 @@ local function validate_pane_navigation(options)
 
   validate_known_keys(pane, ALLOWED_PANE_NAVIGATION, 'pane_navigation')
 
-  for key, value in pairs(pane) do
+  for _, key in ipairs(PANE_NAVIGATION_ORDER) do
+    local value = pane[key]
+    if value == nil then
+      goto continue
+    end
+
     if type(value) ~= 'string' then
       fail('pane_navigation.' .. key .. ' must be a string or nil')
     end
@@ -379,6 +421,8 @@ local function validate_pane_navigation(options)
       fail('pane_navigation.' .. key .. ' conflicts with pane_navigation.' .. seen[value])
     end
     seen[value] = key
+
+    ::continue::
   end
 
   for direction, lhs in pairs(pane) do

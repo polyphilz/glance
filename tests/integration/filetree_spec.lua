@@ -12,12 +12,24 @@ return {
           local filetree = require('glance.filetree')
           local selected = filetree.get_selected_file()
           local keymaps = vim.api.nvim_buf_get_keymap(filetree.buf, 'n')
-          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 3, false)
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 5, false)
+          local saw_stage = false
+          local saw_stage_all = false
+          local saw_unstage = false
+          local saw_unstage_all = false
           local saw_discard = false
           local saw_discard_all = false
 
           for _, map in ipairs(keymaps) do
-            if map.lhs == 'd' then
+            if map.lhs == 's' then
+              saw_stage = true
+            elseif map.lhs == 'S' then
+              saw_stage_all = true
+            elseif map.lhs == 'u' then
+              saw_unstage = true
+            elseif map.lhs == 'U' then
+              saw_unstage_all = true
+            elseif map.lhs == 'd' then
               saw_discard = true
             elseif map.lhs == 'D' then
               saw_discard_all = true
@@ -27,14 +39,20 @@ return {
           A.equal(vim.api.nvim_get_option_value('buftype', { buf = filetree.buf }), 'nofile')
           A.equal(vim.api.nvim_get_option_value('swapfile', { buf = filetree.buf }), false)
           A.equal(vim.api.nvim_get_option_value('filetype', { buf = filetree.buf }), 'glance')
+          A.truthy(saw_stage)
+          A.truthy(saw_stage_all)
+          A.truthy(saw_unstage)
+          A.truthy(saw_unstage_all)
           A.truthy(saw_discard)
           A.truthy(saw_discard_all)
           A.same(lines, {
-            '  discard',
-            '  [d] file   [D] all',
-            '  drag divider to resize',
+            '  actions',
+            '  [s] stage   [S] stage all',
+            '  [u] unstage [U] unstage all',
+            '  [d] discard [D] discard all',
+            '  drag dividers to resize',
           })
-          A.equal(filetree.selected_line, 6)
+          A.equal(filetree.selected_line, 8)
           A.equal(selected.path, repo.files.tracked)
         end)
       end,
@@ -51,19 +69,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 6)
+          A.equal(filetree.selected_line, 8)
           N.press('j')
-          A.equal(filetree.selected_line, 9)
+          A.equal(filetree.selected_line, 11)
           N.press('j')
-          A.equal(filetree.selected_line, 12)
+          A.equal(filetree.selected_line, 14)
           N.press('k')
-          A.equal(filetree.selected_line, 9)
+          A.equal(filetree.selected_line, 11)
           N.press('K')
-          A.equal(filetree.selected_line, 6)
+          A.equal(filetree.selected_line, 8)
           N.press('J')
-          A.equal(filetree.selected_line, 9)
+          A.equal(filetree.selected_line, 11)
           N.press('2j')
-          A.equal(filetree.selected_line, 12)
+          A.equal(filetree.selected_line, 14)
         end)
       end,
     },
@@ -79,19 +97,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 6)
+          A.equal(filetree.selected_line, 8)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 9)
+          A.equal(filetree.selected_line, 11)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 12)
+          A.equal(filetree.selected_line, 14)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 9)
+          A.equal(filetree.selected_line, 11)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 6)
+          A.equal(filetree.selected_line, 8)
         end)
       end,
     },
@@ -193,6 +211,52 @@ return {
           filetree.toggle()
           A.truthy(filetree.win and vim.api.nvim_win_is_valid(filetree.win))
           A.equal(vim.api.nvim_get_current_win(), diffview.new_win)
+        end)
+      end,
+    },
+    {
+      name = 'stage and unstage keymaps mutate only the selected file',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          repo.files.second = 'second.txt'
+          repo:write(repo.files.second, 'second\n')
+          repo:stage(repo.files.second)
+          repo:commit_all('Add second tracked file')
+
+          repo:write(repo.files.tracked, 'alpha\nbeta changed\ngamma\n')
+          repo:write(repo.files.second, 'second changed\n')
+
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+
+          vim.api.nvim_set_current_win(filetree.win)
+          local selected_path = filetree.get_selected_file().path
+          local other_path = selected_path == repo.files.tracked and repo.files.second or repo.files.tracked
+
+          N.press('s')
+
+          local changed = git.get_changed_files()
+          A.truthy(vim.tbl_contains(vim.tbl_map(function(entry)
+            return entry.path
+          end, changed.staged), selected_path))
+          A.truthy(vim.tbl_contains(vim.tbl_map(function(entry)
+            return entry.path
+          end, changed.changes), other_path))
+          A.falsy(vim.tbl_contains(vim.tbl_map(function(entry)
+            return entry.path
+          end, changed.staged), other_path))
+
+          N.press('u')
+
+          changed = git.get_changed_files()
+          A.truthy(vim.tbl_contains(vim.tbl_map(function(entry)
+            return entry.path
+          end, changed.changes), selected_path))
+          A.truthy(vim.tbl_contains(vim.tbl_map(function(entry)
+            return entry.path
+          end, changed.changes), other_path))
+          A.same(changed.staged, {})
         end)
       end,
     },

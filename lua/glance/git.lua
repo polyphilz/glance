@@ -19,7 +19,7 @@ local CONFLICT_STATUS_PAIRS = {
   UU = true,
 }
 
-local DISCARDABLE_KINDS = {
+local ORDINARY_ACTION_KINDS = {
   modified = true,
   added = true,
   deleted = true,
@@ -564,15 +564,22 @@ function M.get_file_content(filepath, ref)
   return lines
 end
 
-local function diff_paths(file)
+function M.entry_paths(file)
   local paths = {}
+  local seen = {}
+  local function add_path(path)
+    if type(path) == 'string' and path ~= '' and not seen[path] then
+      seen[path] = true
+      paths[#paths + 1] = path
+    end
+  end
 
-  if type(file.old_path) == 'string' and file.old_path ~= '' then
-    table.insert(paths, file.old_path)
+  if type(file) ~= 'table' then
+    return paths
   end
-  if type(file.path) == 'string' and file.path ~= '' then
-    table.insert(paths, file.path)
-  end
+
+  add_path(file.old_path)
+  add_path(file.path)
 
   return paths
 end
@@ -584,13 +591,13 @@ local function entry_binary_args(file)
 
   if file.section == 'staged' then
     local args = { 'diff', '--cached', '--numstat', '--' }
-    vim.list_extend(args, diff_paths(file))
+    vim.list_extend(args, M.entry_paths(file))
     return args
   end
 
   if file.section == 'changes' or file.section == 'conflicts' then
     local args = { 'diff', '--numstat', '--' }
-    vim.list_extend(args, diff_paths(file))
+    vim.list_extend(args, M.entry_paths(file))
     return args
   end
 
@@ -654,8 +661,12 @@ function M.ensure_file_binary(file)
 end
 
 M.UNSUPPORTED_DISCARD_MESSAGE = 'glance: discard is not supported for this git state yet'
+M.UNSUPPORTED_STAGE_MESSAGE = 'glance: stage is not supported for this git state yet'
+M.UNSUPPORTED_UNSTAGE_MESSAGE = 'glance: unstage is not supported for this git state yet'
+M.INVALID_STAGE_TARGET_MESSAGE = 'glance: selected file is not stageable from this section'
+M.INVALID_UNSTAGE_TARGET_MESSAGE = 'glance: selected file is not unstageable from this section'
 
-local function infer_file_kind(file)
+function M.infer_stage_kind(file)
   if type(file) ~= 'table' then
     return 'unsupported'
   end
@@ -704,9 +715,49 @@ function M.can_discard_file(file)
     return false, M.UNSUPPORTED_DISCARD_MESSAGE
   end
 
-  local kind = infer_file_kind(file)
-  if not DISCARDABLE_KINDS[kind] then
+  local kind = M.infer_stage_kind(file)
+  if not ORDINARY_ACTION_KINDS[kind] then
     return false, M.UNSUPPORTED_DISCARD_MESSAGE
+  end
+
+  return true
+end
+
+--- Check whether a single file entry is stageable with current release semantics.
+--- @param file table|nil
+--- @return boolean, string|nil
+function M.can_stage_file(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return false, 'invalid file target'
+  end
+
+  local kind = M.infer_stage_kind(file)
+  if kind == 'conflicted' or not ORDINARY_ACTION_KINDS[kind] then
+    return false, M.UNSUPPORTED_STAGE_MESSAGE
+  end
+
+  if file.section ~= 'changes' and file.section ~= 'untracked' then
+    return false, M.INVALID_STAGE_TARGET_MESSAGE
+  end
+
+  return true
+end
+
+--- Check whether a single file entry is unstageable with current release semantics.
+--- @param file table|nil
+--- @return boolean, string|nil
+function M.can_unstage_file(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return false, 'invalid file target'
+  end
+
+  local kind = M.infer_stage_kind(file)
+  if kind == 'conflicted' or not ORDINARY_ACTION_KINDS[kind] or kind == 'untracked' then
+    return false, M.UNSUPPORTED_UNSTAGE_MESSAGE
+  end
+
+  if file.section ~= 'staged' then
+    return false, M.INVALID_UNSTAGE_TARGET_MESSAGE
   end
 
   return true
@@ -731,6 +782,102 @@ function M.can_discard_all(files)
   end
 
   return true
+end
+
+--- Check whether the current repo state is safe for stage-all.
+--- @param files table|nil
+--- @return boolean, string|nil, table|nil
+function M.can_stage_all(files)
+  files = files or M.get_changed_files()
+  if type(files) ~= 'table' then
+    return false, 'invalid files table'
+  end
+
+  for _, section in ipairs({ 'conflicts', 'staged', 'changes', 'untracked' }) do
+    for _, file in ipairs(files[section] or {}) do
+      local kind = M.infer_stage_kind(file)
+      if kind == 'conflicted' or not ORDINARY_ACTION_KINDS[kind] then
+        return false, M.UNSUPPORTED_STAGE_MESSAGE, file
+      end
+    end
+  end
+
+  return true
+end
+
+--- Check whether the current repo state is safe for unstage-all.
+--- @param files table|nil
+--- @return boolean, string|nil, table|nil
+function M.can_unstage_all(files)
+  files = files or M.get_changed_files()
+  if type(files) ~= 'table' then
+    return false, 'invalid files table'
+  end
+
+  for _, file in ipairs(files.conflicts or {}) do
+    return false, M.UNSUPPORTED_UNSTAGE_MESSAGE, file
+  end
+
+  for _, file in ipairs(files.staged or {}) do
+    local kind = M.infer_stage_kind(file)
+    if kind == 'conflicted' or not ORDINARY_ACTION_KINDS[kind] or kind == 'untracked' then
+      return false, M.UNSUPPORTED_UNSTAGE_MESSAGE, file
+    end
+  end
+
+  return true
+end
+
+--- Stage all git-visible changes for a single file path set.
+--- @param file { path: string, old_path: string|nil }|nil
+--- @return boolean, string|nil
+function M.stage_file(file)
+  local allowed, reason = M.can_stage_file(file)
+  if not allowed then
+    return false, reason
+  end
+
+  local args = { 'add', '-A', '--' }
+  vim.list_extend(args, M.entry_paths(file))
+  return run_git(args)
+end
+
+--- Unstage all git-visible changes for a single file path set.
+--- @param file { path: string, old_path: string|nil }|nil
+--- @return boolean, string|nil
+function M.unstage_file(file)
+  local allowed, reason = M.can_unstage_file(file)
+  if not allowed then
+    return false, reason
+  end
+
+  local args = { 'reset', 'HEAD', '--' }
+  vim.list_extend(args, M.entry_paths(file))
+  return run_git(args)
+end
+
+--- Stage all visible repo changes when the current repo state is supported.
+--- @param files table|nil
+--- @return boolean, string|nil
+function M.stage_all(files)
+  local allowed, reason = M.can_stage_all(files)
+  if not allowed then
+    return false, reason
+  end
+
+  return run_git({ 'add', '-A' })
+end
+
+--- Unstage all staged repo changes when the current repo state is supported.
+--- @param files table|nil
+--- @return boolean, string|nil
+function M.unstage_all(files)
+  local allowed, reason = M.can_unstage_all(files)
+  if not allowed then
+    return false, reason
+  end
+
+  return run_git({ 'reset', 'HEAD', '--', '.' })
 end
 
 --- Discard all git-visible changes for a single file path.

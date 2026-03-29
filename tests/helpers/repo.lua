@@ -86,7 +86,18 @@ local function new_fixture(root)
       return self:git({ 'add', '-A' })
     end
 
-    local args = { 'add', '--' }
+    local args = { 'add', '-A', '--' }
+    vim.list_extend(args, paths)
+    return self:git(args)
+  end
+
+  function fixture:unstage(...)
+    local paths = { ... }
+    if #paths == 0 then
+      return self:git({ 'reset', 'HEAD', '--', '.' })
+    end
+
+    local args = { 'reset', 'HEAD', '--' }
     vim.list_extend(args, paths)
     return self:git(args)
   end
@@ -172,6 +183,13 @@ function scenarios.repo_rename(fixture)
   fixture:git({ 'mv', fixture.files.renamed_old, fixture.files.renamed_new })
 end
 
+function scenarios.repo_unstaged_rename(fixture)
+  seed_committed_file(fixture, 'rename-before.txt', 'rename me\n', 'renamed_old')
+  fixture.files.renamed_new = 'rename-after.txt'
+  fixture:rename(fixture.files.renamed_old, fixture.files.renamed_new)
+  fixture:git({ 'add', '-N', '--', fixture.files.renamed_new })
+end
+
 function scenarios.repo_conflict(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'base\n')
   local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
@@ -215,6 +233,12 @@ function scenarios.repo_binary_modified(fixture)
   fixture:stage(fixture.files.binary)
   fixture:git({ 'commit', '-m', 'Seed binary fixture' })
   fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 4, 255), 'wb')
+end
+
+function scenarios.repo_unborn_staged_add(fixture)
+  fixture.files.staged_add = 'new-file.txt'
+  fixture:write(fixture.files.staged_add, 'new staged file\n')
+  fixture:stage(fixture.files.staged_add)
 end
 
 --- Create a temp git repo fixture for a named scenario.

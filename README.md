@@ -24,6 +24,7 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
 - Standalone launcher that opens Glance in `nvim --clean`, so it does not depend on your plugin manager or existing editor config.
 - Single file tree for staged, unstaged, untracked, and conflicted files.
 - Side-by-side diffs with a minimap and live file reloads.
+- Filetree actions to stage, unstage, or discard one file or the whole repo.
 - Safe discard actions for one file or all repo changes, both with confirmation prompts.
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
 
@@ -82,7 +83,7 @@ Glance launches its own `nvim --clean` session and loads only the bundled runtim
 | --- | --- | --- |
 | macOS or Linux | Running Glance | The launcher and installer assume a Unix-like shell environment. |
 | `nvim` `0.11+` | Runtime UI | Must be available on `PATH` as `nvim`. |
-| `git` | Repo detection, diffing, discard actions | Must be available on `PATH` as `git`. |
+| `git` | Repo detection, diffing, stage/unstage/discard actions | Must be available on `PATH` as `git`. |
 | Bash, `readlink`, `ln`, `mkdir` | Launcher and install scripts | Standard on typical macOS/Linux setups. |
 | `curl`, `tar`, `mktemp` | Bootstrap install via `curl ... \| bash` | Not required when installing from a local checkout. |
 | `nvim-treesitter` | Optional richer syntax highlighting | If present in Neovim's standard runtime path, Glance picks it up while running in `--clean` mode. |
@@ -141,6 +142,10 @@ Default keys:
 | `r` | Refresh the file tree and diff state |
 | `J` / `K` | Jump between file tree sections |
 | `<Tab>` | Toggle the file tree |
+| `s` | Stage the selected file |
+| `S` | Stage all supported repo changes |
+| `u` | Unstage the selected file |
+| `U` | Unstage all supported staged changes |
 | `d` | Discard the selected file after confirmation |
 | `D` | Discard all repo changes after confirmation |
 
