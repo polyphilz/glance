@@ -73,8 +73,6 @@ Launch a clean review UI for staged, unstaged, and untracked files without touch
 | macOS or Linux | Running Glance | The launcher and installer assume a Unix-like shell environment. |
 | `nvim` `0.11+` | Runtime UI | Must be available on `PATH` as `nvim`. |
 | `git` | Repo detection, diffing, stage/unstage/discard actions | Must be available on `PATH` as `git`. |
-| Bash, `readlink`, `ln`, `mkdir` | Launcher and install scripts | Standard on typical macOS/Linux setups. |
-| `curl`, `tar`, `mktemp` | Bootstrap install via `curl ... \| bash` | Not required when installing from a local checkout. |
 | `nvim-treesitter` | Optional richer syntax highlighting | If present in Neovim's standard runtime path, Glance picks it up while running in `--clean` mode. |
 
 <details>
