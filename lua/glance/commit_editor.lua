@@ -37,7 +37,7 @@ end
 local function apply_window_options(win)
   vim.api.nvim_win_set_option(win, 'wrap', true)
   vim.api.nvim_win_set_option(win, 'linebreak', true)
-  vim.api.nvim_win_set_option(win, 'spell', true)
+  vim.api.nvim_win_set_option(win, 'spell', false)
   vim.api.nvim_win_set_option(win, 'cursorline', false)
   vim.api.nvim_win_set_option(win, 'number', false)
   vim.api.nvim_win_set_option(win, 'relativenumber', false)
@@ -123,7 +123,9 @@ local function setup_buffer()
   vim.api.nvim_buf_set_option(M.buf, 'filetype', 'gitcommit')
   vim.api.nvim_buf_set_option(M.buf, 'modifiable', true)
   vim.api.nvim_buf_set_option(M.buf, 'readonly', false)
-  vim.api.nvim_buf_set_option(M.buf, 'textwidth', 72)
+  -- Keep long subjects visually wrapped inside the modal without inserting
+  -- hard line breaks that turn wrapped text into a commit body.
+  vim.api.nvim_buf_set_option(M.buf, 'textwidth', 0)
 end
 
 local function setup_keymaps()

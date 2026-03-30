@@ -17,10 +17,10 @@ return {
         A.equal(vim.api.nvim_get_option_value('bufhidden', { buf = commit_editor.buf }), 'hide')
         A.equal(vim.api.nvim_get_option_value('swapfile', { buf = commit_editor.buf }), false)
         A.equal(vim.api.nvim_get_option_value('filetype', { buf = commit_editor.buf }), 'gitcommit')
-        A.equal(vim.api.nvim_get_option_value('textwidth', { buf = commit_editor.buf }), 72)
+        A.equal(vim.api.nvim_get_option_value('textwidth', { buf = commit_editor.buf }), 0)
         A.equal(vim.api.nvim_get_option_value('wrap', { win = commit_editor.win }), true)
         A.equal(vim.api.nvim_get_option_value('linebreak', { win = commit_editor.win }), true)
-        A.equal(vim.api.nvim_get_option_value('spell', { win = commit_editor.win }), true)
+        A.equal(vim.api.nvim_get_option_value('spell', { win = commit_editor.win }), false)
         A.equal(vim.api.nvim_get_option_value('winhighlight', { win = commit_editor.win }), 'FloatTitle:GlanceLegendKey')
 
         commit_editor.close({

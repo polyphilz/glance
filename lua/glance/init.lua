@@ -123,6 +123,7 @@ function M.setup_highlights()
   -- Editor
   vim.api.nvim_set_hl(0, 'Normal', { bg = bg, fg = fg })
   vim.api.nvim_set_hl(0, 'NormalNC', { bg = bg, fg = fg })
+  vim.api.nvim_set_hl(0, 'NormalFloat', { bg = bg, fg = fg })
   vim.api.nvim_set_hl(0, 'CursorLine', { bg = line_hl })
   vim.api.nvim_set_hl(0, 'Visual', { bg = selection })
   vim.api.nvim_set_hl(0, 'LineNr', { fg = palette.line_nr, bg = bg })
@@ -158,6 +159,9 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'Tag', { fg = keyword })
   vim.api.nvim_set_hl(0, 'Delimiter', { fg = fg })
   vim.api.nvim_set_hl(0, 'Title', { fg = func, bold = true })
+  vim.api.nvim_set_hl(0, 'gitcommitSummary', { fg = keyword })
+  vim.api.nvim_set_hl(0, 'gitcommitOverflow', { fg = keyword })
+  vim.api.nvim_set_hl(0, 'gitcommitBlank', { fg = fg })
 
   -- Tree-sitter highlight groups
   vim.api.nvim_set_hl(0, '@comment', { fg = comment, italic = true })
