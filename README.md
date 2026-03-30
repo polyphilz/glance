@@ -2,9 +2,9 @@
 
 <img src="assets/readme/dist/glance-hero-stars.gif" width="640" alt="Animated glance hero">
 
-A standalone Git diff review CLI tool powered by Neovim.
+A standalone Git diff review TUI powered by Neovim.
 
-Launch a clean review UI for staged, unstaged, untracked, and conflicted files without touching your existing Neovim setup.
+Launch a clean review UI for staged, unstaged, and untracked files without touching your existing Neovim setup.
 
 <a href="https://github.com/polyphilz/glance/actions/workflows/ci.yaml" target="_blank"><img src="https://github.com/polyphilz/glance/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
 <a href="https://www.apple.com/macos/" target="_blank"><img src="https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white" alt="macOS"></a>
@@ -22,12 +22,12 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
 ## Features
 
 - Standalone launcher that opens Glance in `nvim --clean`, so it does not depend on your plugin manager or existing editor config.
-- Single file tree for staged, unstaged, untracked, and conflicted files.
 - Side-by-side diffs with a minimap and live file reloads.
-- Filetree actions to stage, unstage, or discard one file or the whole repo.
-- Filetree commit flow for staged changes with a multi-line floating commit editor.
-- Filetree-launched read-only commit history browser with commit preview and hash copy.
-- Safe discard actions for one file or all repo changes, both with confirmation prompts.
+- Unified file tree workflow:
+  - single file tree for staged, unstaged, untracked, and conflicted files
+  - stage, unstage, or discard one file or the whole repo
+  - staged-change commit flow with a multi-line floating commit editor
+  - read-only commit history browser launched from the file tree, with commit preview and hash copy
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
 
 ## Quick Start
