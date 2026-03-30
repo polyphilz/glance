@@ -294,6 +294,15 @@ Notes:
 
 </details>
 
+## Roadmap
+
+Glance is still focused on the local review loop. Near-term work includes:
+
+- Hunk-level stage, unstage, and discard
+- Better coverage for renames, binary files, copied / type-changed entries, and conflicts
+- Filetree filtering and path search for larger changesets
+- File-scoped history, plus better commit-loop ergonomics like amend and fixup
+
 ## License
 
 MIT
