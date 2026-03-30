@@ -21,6 +21,14 @@ local function apply_colorscheme(colorscheme)
   end
 end
 
+local function enable_system_clipboard_if_available()
+  if vim.fn['provider#clipboard#Executable']() == '' then
+    return
+  end
+
+  vim.opt.clipboard = 'unnamedplus'
+end
+
 local function setup_app_autocmds(app, watch_enabled)
   vim.api.nvim_clear_autocmds({ group = APP_AUGROUP })
 
@@ -80,6 +88,7 @@ function M.start()
   vim.opt.hidden = app.hidden
   vim.opt.smoothscroll = app.smoothscroll
   vim.opt.mousescroll = app.mousescroll
+  enable_system_clipboard_if_available()
   if app.hide_statusline then
     vim.opt.laststatus = 0
   end

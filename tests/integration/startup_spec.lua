@@ -89,6 +89,54 @@ return {
       end,
     },
     {
+      name = 'startup enables unnamedplus when a clipboard provider is available',
+      run = function()
+        N.with_repo('repo_modified', function()
+          local original_provider = vim.fn['provider#clipboard#Executable']
+
+          vim.fn['provider#clipboard#Executable'] = function()
+            return 'clipboard-tool'
+          end
+          vim.o.clipboard = ''
+
+          local ok, err = xpcall(function()
+            require('glance').start()
+            A.equal(vim.o.clipboard, 'unnamedplus')
+          end, debug.traceback)
+
+          vim.fn['provider#clipboard#Executable'] = original_provider
+
+          if not ok then
+            error(err, 0)
+          end
+        end)
+      end,
+    },
+    {
+      name = 'startup leaves clipboard unchanged when no clipboard provider is available',
+      run = function()
+        N.with_repo('repo_modified', function()
+          local original_provider = vim.fn['provider#clipboard#Executable']
+
+          vim.fn['provider#clipboard#Executable'] = function()
+            return ''
+          end
+          vim.o.clipboard = ''
+
+          local ok, err = xpcall(function()
+            require('glance').start()
+            A.equal(vim.o.clipboard, '')
+          end, debug.traceback)
+
+          vim.fn['provider#clipboard#Executable'] = original_provider
+
+          if not ok then
+            error(err, 0)
+          end
+        end)
+      end,
+    },
+    {
       name = 'conflicts count as startup-visible changes and render a conflicts section',
       run = function()
         N.with_repo('repo_conflict', function(repo)
