@@ -39,6 +39,14 @@ Launch a clean review UI for staged, unstaged, and untracked files without touch
 
 2. Install Glance:
 
+   **Homebrew (macOS / Linux):**
+
+   ```bash
+   brew install polyphilz/tap/glance
+   ```
+
+   **Shell installer:**
+
    ```bash
    curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | bash
    ```
