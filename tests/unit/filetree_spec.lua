@@ -50,6 +50,7 @@ return {
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
           '  [c] commit staged changes',
+          '  [L] browse commit history',
           '',
           '  Staged Changes',
           '    M staged.txt',
@@ -60,7 +61,7 @@ return {
           '  Untracked',
           '    ? new.txt',
         })
-        A.equal(filetree.selected_line, 8)
+        A.equal(filetree.selected_line, 9)
       end,
     },
     {
@@ -82,6 +83,7 @@ return {
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
           '  [c] commit staged changes',
+          '  [L] browse commit history',
           '',
           '  Conflicts',
           '    U conflict.txt',
@@ -89,7 +91,7 @@ return {
           '  Changes',
           '    T typed.txt',
         })
-        A.equal(filetree.selected_line, 8)
+        A.equal(filetree.selected_line, 9)
       end,
     },
     {
@@ -109,7 +111,7 @@ return {
           untracked = {},
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    R old/path.txt → new/path.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[9], '    R old/path.txt → new/path.txt')
       end,
     },
     {
@@ -133,8 +135,8 @@ return {
           },
         })
 
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[8], '    ! conflict.txt')
-        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[11], '    > copied.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[9], '    ! conflict.txt')
+        A.equal(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)[12], '    > copied.txt')
       end,
     },
     {
@@ -153,12 +155,13 @@ return {
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
           '  [c] commit staged changes',
+          '  [L] browse commit history',
           '',
           '  No changes found',
         })
         A.equal(filetree.get_selected_file(), nil)
         A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
-        A.same(vim.api.nvim_win_get_cursor(filetree.win), { 7, 4 })
+        A.same(vim.api.nvim_win_get_cursor(filetree.win), { 8, 4 })
       end,
     },
     {
@@ -219,6 +222,19 @@ return {
         A.equal(filetree.status_highlight('U'), 'GlanceStatusConflict')
         A.equal(filetree.status_highlight('?'), 'GlanceStatusU')
         A.equal(filetree.status_highlight('X'), nil)
+      end,
+    },
+    {
+      name = 'render legend includes the log action',
+      run = function()
+        local filetree = setup_filetree()
+        filetree.render({
+          changes = {
+            { path = 'changed.txt', status = 'M', section = 'changes' },
+          },
+        })
+
+        A.contains(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), '  [L] browse commit history')
       end,
     },
     {
@@ -294,6 +310,43 @@ return {
         commit_editor.is_open = original_is_open
         commit_editor.focus = original_focus
         commit_editor.open = original_open
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'open log view reuses an existing modal by focusing it',
+      run = function()
+        local filetree = setup_filetree()
+        local log_view = require('glance.log_view')
+        local original_is_open = log_view.is_open
+        local original_focus = log_view.focus
+        local original_open = log_view.open
+        local focus_called = false
+        local open_called = false
+
+        local ok, err = xpcall(function()
+          log_view.is_open = function()
+            return true
+          end
+          log_view.focus = function()
+            focus_called = true
+          end
+          log_view.open = function()
+            open_called = true
+          end
+
+          filetree.open_log_view()
+
+          A.truthy(focus_called)
+          A.falsy(open_called)
+        end, debug.traceback)
+
+        log_view.is_open = original_is_open
+        log_view.focus = original_focus
+        log_view.open = original_open
 
         if not ok then
           error(err)

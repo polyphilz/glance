@@ -73,6 +73,9 @@ return {
           filetree = {
             show_legend = true,
           },
+          log = {
+            max_commits = 200,
+          },
           keymaps = {
             open_file = '<CR>',
             quit = 'q',
@@ -81,6 +84,7 @@ return {
             prev_section = 'K',
             toggle_filetree = '<Tab>',
             commit = 'c',
+            log = 'L',
             stage_file = 's',
             stage_all = 'S',
             unstage_file = 'u',
@@ -137,6 +141,9 @@ return {
           filetree = {
             show_legend = false,
           },
+          log = {
+            max_commits = 75,
+          },
           theme = {
             preset = 'one_light',
             palette = {
@@ -152,6 +159,7 @@ return {
           keymaps = {
             quit = 'x',
             commit = 'm',
+            log = 'o',
             stage_file = 'g',
             discard_file = 'z',
           },
@@ -164,6 +172,7 @@ return {
         A.equal(config.options.windows.filetree.width, 42)
         A.equal(config.options.windows.filetree.cursorline, true)
         A.equal(config.options.filetree.show_legend, false)
+        A.equal(config.options.log.max_commits, 75)
         A.equal(config.options.windows.diff.relativenumber, false)
         A.equal(config.options.theme.preset, 'one_light')
         A.equal(config.options.theme.palette.logo, '#ffffff')
@@ -176,6 +185,7 @@ return {
         A.equal(config.options.pane_navigation.right, nil)
         A.equal(config.options.keymaps.quit, 'x')
         A.equal(config.options.keymaps.commit, 'm')
+        A.equal(config.options.keymaps.log, 'o')
         A.equal(config.options.keymaps.stage_file, 'g')
         A.equal(config.options.keymaps.stage_all, 'S')
         A.equal(config.options.keymaps.unstage_file, 'u')
@@ -288,6 +298,22 @@ return {
 
         A.falsy(ok)
         A.match(err, 'filetree%.show_legend must be a boolean')
+      end,
+    },
+    {
+      name = 'invalid log options are rejected',
+      run = function()
+        local config = require('glance.config')
+        local ok, err = pcall(function()
+          config.setup({
+            log = {
+              max_commits = 0,
+            },
+          })
+        end)
+
+        A.falsy(ok)
+        A.match(err, 'log%.max_commits must be an integer >= 1')
       end,
     },
     {
@@ -437,14 +463,14 @@ return {
         local ok, err = pcall(function()
           config.setup({
             keymaps = {
-              stage_file = 'c',
+              log = 'c',
               commit = 'c',
             },
           })
         end)
 
         A.falsy(ok)
-        A.match(err, 'keymaps%.stage_file conflicts with keymaps%.commit')
+        A.match(err, 'keymaps%.log conflicts with keymaps%.commit')
       end,
     },
   },

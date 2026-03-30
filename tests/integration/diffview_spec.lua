@@ -344,7 +344,7 @@ return {
             app = {},
             pane_navigation = {
               left = 'H',
-              right = 'L',
+              right = ']',
             },
           })
           require('glance').start()
@@ -360,7 +360,7 @@ return {
           for _, map in ipairs(keymaps) do
             if map.lhs == 'H' then
               has_left = true
-            elseif map.lhs == 'L' then
+            elseif map.lhs == ']' then
               has_right = true
             end
           end
@@ -372,10 +372,10 @@ return {
           N.press('H')
           A.equal(vim.api.nvim_get_current_win(), filetree.win)
 
-          N.press('L')
+          N.press(']')
           A.equal(vim.api.nvim_get_current_win(), diffview.old_win)
 
-          N.press('L')
+          N.press(']')
           A.equal(vim.api.nvim_get_current_win(), diffview.new_win)
 
           A.truthy(has_left)

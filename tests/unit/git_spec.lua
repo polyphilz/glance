@@ -43,6 +43,120 @@ return {
       end,
     },
     {
+      name = 'parse_log_entries handles machine-formatted git log output',
+      run = function()
+        local git = require('glance.git')
+        local output = table.concat({
+          table.concat({
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'aaaaaaa',
+            'HEAD -> main, origin/main',
+            'Glance Tests',
+            '2 hours ago',
+            'Add history browser',
+          }, string.char(31)),
+          table.concat({
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            'bbbbbbb',
+            'tag: v0.1.0',
+            'Glance Tests',
+            '3 days ago',
+            'Handle subjects with spaces',
+          }, string.char(31)),
+        }, string.char(30)) .. string.char(30)
+
+        A.same(git.parse_log_entries(output), {
+          {
+            hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            short_hash = 'aaaaaaa',
+            decorations = 'HEAD -> main, origin/main',
+            author_name = 'Glance Tests',
+            relative_date = '2 hours ago',
+            subject = 'Add history browser',
+          },
+          {
+            hash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            short_hash = 'bbbbbbb',
+            decorations = 'tag: v0.1.0',
+            author_name = 'Glance Tests',
+            relative_date = '3 days ago',
+            subject = 'Handle subjects with spaces',
+          },
+        })
+      end,
+    },
+    {
+      name = 'parse_log_entries strips git record newlines from later entries',
+      run = function()
+        local git = require('glance.git')
+        local output = table.concat({
+          table.concat({
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'aaaaaaa',
+            'HEAD -> main',
+            'Glance Tests',
+            '2 hours ago',
+            'Newest commit',
+          }, string.char(31)),
+          '\n' .. table.concat({
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            'bbbbbbb',
+            '',
+            'Glance Tests',
+            '3 days ago',
+            'Older commit',
+          }, string.char(31)),
+        }, string.char(30)) .. string.char(30)
+
+        A.same(git.parse_log_entries(output), {
+          {
+            hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            short_hash = 'aaaaaaa',
+            decorations = 'HEAD -> main',
+            author_name = 'Glance Tests',
+            relative_date = '2 hours ago',
+            subject = 'Newest commit',
+          },
+          {
+            hash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            short_hash = 'bbbbbbb',
+            decorations = '',
+            author_name = 'Glance Tests',
+            relative_date = '3 days ago',
+            subject = 'Older commit',
+          },
+        })
+      end,
+    },
+    {
+      name = 'parse_log_entries treats empty output as no commits',
+      run = function()
+        local git = require('glance.git')
+        A.same(git.parse_log_entries(''), {})
+      end,
+    },
+    {
+      name = 'get_log_entries normalizes empty-history git errors to an empty list',
+      run = function()
+        local git = require('glance.git')
+        local original_run_git_capture = git.run_git_capture
+
+        local ok, err = xpcall(function()
+          git.run_git_capture = function()
+            return false, "fatal: your current branch 'main' does not have any commits yet"
+          end
+
+          A.same(git.get_log_entries(), {})
+        end, debug.traceback)
+
+        git.run_git_capture = original_run_git_capture
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
       name = 'low-level parse preserves raw status and old path for rename and copy entries',
       run = function()
         local git = require('glance.git')
@@ -694,6 +808,32 @@ return {
           A.same(changed.staged, {})
           A.length(changed.changes, 1)
           A.equal(changed.changes[1].path, repo.files.tracked)
+        end)
+      end,
+    },
+    {
+      name = 'integration get_log_entries and get_commit_preview expose commit history details',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_history', function(repo)
+          local entries, err = git.get_log_entries({
+            max_commits = 10,
+          })
+          A.truthy(entries, err)
+          A.truthy(#entries >= 3)
+          A.equal(entries[1].subject, 'Add notes')
+          A.equal(entries[1].author_name, 'Glance Tests')
+          A.match(entries[1].relative_date, 'ago$')
+          A.equal(entries[2].subject, 'Rename tracked file')
+          A.equal(entries[3].subject, 'Seed history')
+
+          local preview, preview_err = git.get_commit_preview(entries[1].hash)
+          A.truthy(preview, preview_err)
+          A.contains(preview[1], 'commit ' .. entries[1].hash)
+          A.contains(table.concat(preview, '\n'), 'Author:     Glance Tests <glance-tests@example.com>')
+          A.contains(table.concat(preview, '\n'), 'Add notes')
+          A.contains(table.concat(preview, '\n'), repo.files.notes)
         end)
       end,
     },

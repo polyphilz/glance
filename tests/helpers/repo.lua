@@ -141,6 +141,9 @@ function scenarios.repo_no_changes(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
 end
 
+function scenarios.repo_unborn_clean(_fixture)
+end
+
 function scenarios.repo_modified(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
   fixture:write(fixture.files.tracked, 'alpha\nbeta modified\ngamma\n')
@@ -239,6 +242,23 @@ function scenarios.repo_unborn_staged_add(fixture)
   fixture.files.staged_add = 'new-file.txt'
   fixture:write(fixture.files.staged_add, 'new staged file\n')
   fixture:stage(fixture.files.staged_add)
+end
+
+function scenarios.repo_history(fixture)
+  fixture.files.tracked = 'tracked.txt'
+  fixture:write(fixture.files.tracked, 'alpha\nbeta\ngamma\n')
+  fixture:stage(fixture.files.tracked)
+  fixture:git({ 'commit', '-m', 'Seed history' })
+
+  fixture.files.renamed = 'renamed.txt'
+  fixture:git({ 'mv', fixture.files.tracked, fixture.files.renamed })
+  fixture.files.tracked = fixture.files.renamed
+  fixture:git({ 'commit', '-m', 'Rename tracked file' })
+
+  fixture.files.notes = 'notes/todo.txt'
+  fixture:write(fixture.files.notes, 'todo\n')
+  fixture:stage(fixture.files.notes)
+  fixture:git({ 'commit', '-m', 'Add notes' })
 end
 
 --- Create a temp git repo fixture for a named scenario.

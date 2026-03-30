@@ -43,6 +43,7 @@ function M.reset()
   local commit_editor = loaded['glance.commit_editor']
   local diffview = loaded['glance.diffview']
   local filetree = loaded['glance.filetree']
+  local log_view = loaded['glance.log_view']
   local minimap = loaded['glance.minimap']
   local repo_sync = loaded['glance.repo_sync']
   local ui = loaded['glance.ui']
@@ -59,6 +60,7 @@ function M.reset()
 
   clear_group(diffview and diffview.autocmd_group)
   clear_group('GlanceCommitEditor')
+  clear_group('GlanceLogView')
   clear_group(minimap and minimap.augroup)
   clear_group('GlanceApp')
 
@@ -71,8 +73,10 @@ function M.reset()
   pcall(vim.cmd, 'silent! only')
 
   close_window(commit_editor and commit_editor.win)
+  close_window(log_view and log_view.win)
   delete_buffer(minimap and minimap.buf)
   delete_buffer(commit_editor and commit_editor.buf)
+  delete_buffer(log_view and log_view.buf)
   delete_buffer(ui and ui.welcome_buf)
   delete_buffer(diffview and diffview.old_buf)
   delete_buffer(diffview and diffview.new_buf)
@@ -107,6 +111,20 @@ function M.reset()
     commit_editor.on_cancel = nil
     commit_editor.closing = false
     commit_editor.suppress_win_closed = false
+  end
+
+  if log_view then
+    log_view.buf = nil
+    log_view.win = nil
+    log_view.mode = 'list'
+    log_view.entries = {}
+    log_view.line_map = {}
+    log_view.entry_lines = {}
+    log_view.selected_index = 1
+    log_view.selected_hash = nil
+    log_view.preview_hash = nil
+    log_view.return_win = nil
+    log_view.closing = false
   end
 
   if minimap then

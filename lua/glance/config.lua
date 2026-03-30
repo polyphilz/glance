@@ -13,6 +13,7 @@ local ALLOWED_TOP_LEVEL = {
   theme = true,
   windows = true,
   filetree = true,
+  log = true,
   keymaps = true,
   pane_navigation = true,
   hunk_navigation = true,
@@ -80,6 +81,10 @@ local ALLOWED_FILETREE = {
   show_legend = true,
 }
 
+local ALLOWED_LOG = {
+  max_commits = true,
+}
+
 local ALLOWED_FILETREE_WINDOW = {
   width = true,
   number = true,
@@ -105,6 +110,7 @@ local ALLOWED_KEYMAPS = {
   prev_section = true,
   toggle_filetree = true,
   commit = true,
+  log = true,
   stage_file = true,
   stage_all = true,
   unstage_file = true,
@@ -121,6 +127,7 @@ local KEYMAP_ORDER = {
   'prev_section',
   'toggle_filetree',
   'commit',
+  'log',
   'stage_file',
   'stage_all',
   'unstage_file',
@@ -212,6 +219,9 @@ local BASE_DEFAULTS = {
   filetree = {
     show_legend = true,
   },
+  log = {
+    max_commits = 200,
+  },
   keymaps = {
     open_file = '<CR>',
     quit = 'q',
@@ -220,6 +230,7 @@ local BASE_DEFAULTS = {
     prev_section = 'K',
     toggle_filetree = '<Tab>',
     commit = 'c',
+    log = 'L',
     stage_file = 's',
     stage_all = 'S',
     unstage_file = 'u',
@@ -386,6 +397,12 @@ local function validate_filetree(options)
   validate_boolean(filetree.show_legend, 'filetree.show_legend')
 end
 
+local function validate_log(options)
+  local log = options.log
+  validate_known_keys(log, ALLOWED_LOG, 'log')
+  validate_integer(log.max_commits, 'log.max_commits', 1)
+end
+
 local function validate_keymaps(options)
   local keymaps = options.keymaps
   local seen = {}
@@ -509,6 +526,7 @@ local function validate_options(options)
   validate_theme(options)
   validate_windows(options)
   validate_filetree(options)
+  validate_log(options)
   validate_keymaps(options)
   validate_pane_navigation(options)
   validate_hunk_navigation(options)

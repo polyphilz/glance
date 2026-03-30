@@ -211,6 +211,7 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceLegendTitle', { fg = comment, bg = bg, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceLegendBracket', { fg = palette.split, bg = bg })
   vim.api.nvim_set_hl(0, 'GlanceLegendKey', { fg = param, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceAccentText', { fg = param, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceLegendText', { fg = comment, bg = bg })
   vim.api.nvim_set_hl(0, 'GlanceLegendHint', { fg = palette.accent, bg = bg, bold = true })
 

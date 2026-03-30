@@ -12,12 +12,13 @@ return {
           local filetree = require('glance.filetree')
           local selected = filetree.get_selected_file()
           local keymaps = vim.api.nvim_buf_get_keymap(filetree.buf, 'n')
-          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 5, false)
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, 6, false)
           local saw_stage = false
           local saw_stage_all = false
           local saw_unstage = false
           local saw_unstage_all = false
           local saw_commit = false
+          local saw_log = false
           local saw_discard = false
           local saw_discard_all = false
 
@@ -32,6 +33,8 @@ return {
               saw_unstage_all = true
             elseif map.lhs == 'c' then
               saw_commit = true
+            elseif map.lhs == 'L' then
+              saw_log = true
             elseif map.lhs == 'd' then
               saw_discard = true
             elseif map.lhs == 'D' then
@@ -47,6 +50,7 @@ return {
           A.truthy(saw_unstage)
           A.truthy(saw_unstage_all)
           A.truthy(saw_commit)
+          A.truthy(saw_log)
           A.truthy(saw_discard)
           A.truthy(saw_discard_all)
           A.same(lines, {
@@ -55,8 +59,9 @@ return {
             '  [u] unstage [U] unstage all',
             '  [d] discard [D] discard all',
             '  [c] commit staged changes',
+            '  [L] browse commit history',
           })
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           A.equal(selected.path, repo.files.tracked)
         end)
       end,
@@ -73,19 +78,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           N.press('j')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
           N.press('j')
-          A.equal(filetree.selected_line, 14)
+          A.equal(filetree.selected_line, 15)
           N.press('k')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
           N.press('K')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
           N.press('J')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
           N.press('2j')
-          A.equal(filetree.selected_line, 14)
+          A.equal(filetree.selected_line, 15)
         end)
       end,
     },
@@ -101,19 +106,19 @@ return {
           local filetree = require('glance.filetree')
 
           vim.api.nvim_set_current_win(filetree.win)
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
 
           N.press('<Down>')
-          A.equal(filetree.selected_line, 14)
+          A.equal(filetree.selected_line, 15)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 11)
+          A.equal(filetree.selected_line, 12)
 
           N.press('<Up>')
-          A.equal(filetree.selected_line, 8)
+          A.equal(filetree.selected_line, 9)
         end)
       end,
     },

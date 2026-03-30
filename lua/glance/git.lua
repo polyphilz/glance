@@ -27,6 +27,10 @@ local ORDINARY_ACTION_KINDS = {
   untracked = true,
 }
 
+local LOG_FIELD_SEPARATOR = string.char(31)
+local LOG_RECORD_SEPARATOR = string.char(30)
+local DEFAULT_LOG_MAX_COMMITS = 200
+
 M._repo_root = nil
 M._repo_root_cwd = nil
 M._git_dir = nil
@@ -190,6 +194,120 @@ function M.run_git_capture(args, opts)
   end
 
   return true, output
+end
+
+local function split_lines(output)
+  if type(output) ~= 'string' or output == '' then
+    return {}
+  end
+
+  local lines = vim.split(output, '\n', {
+    plain = true,
+    trimempty = false,
+  })
+  if lines[#lines] == '' then
+    table.remove(lines)
+  end
+  return lines
+end
+
+local function trim_log_field(value)
+  if type(value) ~= 'string' then
+    return value
+  end
+
+  return (value:gsub('^[\r\n]+', ''):gsub('[\r\n]+$', ''))
+end
+
+local function log_max_commits(opts)
+  local value = opts and opts.max_commits or nil
+  if type(value) == 'number' and value >= 1 and value % 1 == 0 then
+    return value
+  end
+
+  return DEFAULT_LOG_MAX_COMMITS
+end
+
+local function is_no_commits_error(message)
+  if type(message) ~= 'string' or message == '' then
+    return false
+  end
+
+  local lower = message:lower()
+  return lower:find('does not have any commits yet', 1, true) ~= nil
+    or lower:find('bad default revision', 1, true) ~= nil
+end
+
+function M.parse_log_entries(output)
+  local entries = {}
+  if type(output) ~= 'string' or output == '' then
+    return entries
+  end
+
+  for record in output:gmatch('([^' .. LOG_RECORD_SEPARATOR .. ']+)') do
+    local fields = vim.split(record, LOG_FIELD_SEPARATOR, {
+      plain = true,
+      trimempty = false,
+    })
+
+    if #fields >= 6 then
+      for index, field in ipairs(fields) do
+        fields[index] = trim_log_field(field)
+      end
+    end
+
+    if #fields >= 6 and fields[1] ~= '' then
+      entries[#entries + 1] = {
+        hash = fields[1],
+        short_hash = fields[2],
+        decorations = fields[3],
+        author_name = fields[4],
+        relative_date = fields[5],
+        subject = fields[6],
+      }
+    end
+  end
+
+  return entries
+end
+
+function M.get_log_entries(opts)
+  local ok, output = M.run_git_capture({
+    '--no-pager',
+    'log',
+    '--max-count=' .. tostring(log_max_commits(opts)),
+    '--decorate=short',
+    '--date=relative',
+    '--format=%H%x1f%h%x1f%D%x1f%an%x1f%ar%x1f%s%x1e',
+  })
+
+  if not ok then
+    if is_no_commits_error(output) then
+      return {}
+    end
+    return nil, output
+  end
+
+  return M.parse_log_entries(output)
+end
+
+function M.get_commit_preview(oid)
+  local ok, output = M.run_git_capture({
+    '--no-pager',
+    'show',
+    '--stat',
+    '--patch',
+    '--decorate=short',
+    '--color=never',
+    '--format=fuller',
+    oid,
+  })
+
+  if not ok then
+    return nil, output
+  end
+
+  return split_lines(output)
 end
 
 local function path_exists_at_head(filepath)

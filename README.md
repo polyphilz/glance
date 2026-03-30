@@ -26,6 +26,7 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
 - Side-by-side diffs with a minimap and live file reloads.
 - Filetree actions to stage, unstage, or discard one file or the whole repo.
 - Filetree commit flow for staged changes with a multi-line floating commit editor.
+- Filetree-launched read-only commit history browser with commit preview and hash copy.
 - Safe discard actions for one file or all repo changes, both with confirmation prompts.
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
 
@@ -148,10 +149,13 @@ Default keys:
 | `u` | Unstage the selected file |
 | `U` | Unstage all supported staged changes |
 | `c` | Commit the staged set in a floating editor |
+| `L` | Open the read-only git log modal |
 | `d` | Discard the selected file after confirmation |
 | `D` | Discard all repo changes after confirmation |
 
 Pane navigation uses Neovim's built-in window commands by default, so `<C-w><Left>`, `<C-w><Right>`, `<C-w><Up>`, and `<C-w><Down>` work in Glance, along with `<C-w>h/j/k/l`.
+
+Inside the git log modal, use `j` / `k` to move between commits, `<CR>` to preview the selected commit, `y` to copy the full hash, `r` to refresh, and `q` to go back or close.
 
 ## Configuration
 
@@ -191,6 +195,9 @@ return {
     diff = {
       relativenumber = false,
     },
+  },
+  log = {
+    max_commits = 200,
   },
   filetree = {
     show_legend = false,
@@ -249,6 +256,7 @@ Available top-level config domains:
 - `theme`
 - `windows`
 - `filetree`
+- `log`
 - `keymaps`
 - `pane_navigation`
 - `hunk_navigation`

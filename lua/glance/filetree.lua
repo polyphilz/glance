@@ -81,7 +81,7 @@ end
 
 local function legend_line_count()
   if filetree_config().show_legend then
-    return 6
+    return 7
   end
   return 0
 end
@@ -214,6 +214,7 @@ local function add_legend(lines, highlights)
   local km = config.options.keymaps
   local title = '  actions'
   local commit_line = '  [' .. km.commit .. '] commit staged changes'
+  local log_line = '  [' .. km.log .. '] browse commit history'
   local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
   local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
   local discard_line = '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all'
@@ -223,6 +224,7 @@ local function add_legend(lines, highlights)
   lines[#lines + 1] = unstage_line
   lines[#lines + 1] = discard_line
   lines[#lines + 1] = commit_line
+  lines[#lines + 1] = log_line
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
@@ -230,10 +232,12 @@ local function add_legend(lines, highlights)
   add_highlight(highlights, 3, 0, #unstage_line, 'GlanceLegendText')
   add_highlight(highlights, 4, 0, #discard_line, 'GlanceLegendText')
   add_highlight(highlights, 5, 0, #commit_line, 'GlanceLegendText')
+  add_highlight(highlights, 6, 0, #log_line, 'GlanceLegendText')
   add_legend_key_highlights(highlights, 2, stage_line)
   add_legend_key_highlights(highlights, 3, unstage_line)
   add_legend_key_highlights(highlights, 4, discard_line)
   add_legend_key_highlights(highlights, 5, commit_line)
+  add_legend_key_highlights(highlights, 6, log_line)
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -955,6 +959,16 @@ function M.open_commit_editor()
   })
 end
 
+function M.open_log_view()
+  local log_view = require('glance.log_view')
+  if log_view.is_open() then
+    log_view.focus()
+    return
+  end
+
+  log_view.open()
+end
+
 --- Set up buffer-local keymaps for the file tree.
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
@@ -970,6 +984,7 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.refresh, function() M.refresh() end, opts)
   vim.keymap.set('n', km.toggle_filetree, function() M.toggle() end, opts)
   vim.keymap.set('n', km.commit, function() M.open_commit_editor() end, opts)
+  vim.keymap.set('n', km.log, function() M.open_log_view() end, opts)
   vim.keymap.set('n', km.stage_file, function() M.stage_selected_file() end, opts)
   vim.keymap.set('n', km.stage_all, function() M.stage_all() end, opts)
   vim.keymap.set('n', km.unstage_file, function() M.unstage_selected_file() end, opts)
