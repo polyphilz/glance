@@ -573,6 +573,146 @@ return {
       end,
     },
     {
+      name = 'commit safety requires staged changes and only blocks unresolved conflicts',
+      run = function()
+        local git = require('glance.git')
+        local ok, err
+
+        ok, err = git.can_commit(files({
+          changes = {
+            file({
+              path = 'tracked.txt',
+              kind = 'modified',
+              status = 'M',
+              section = 'changes',
+            }),
+          },
+        }))
+        A.falsy(ok)
+        A.equal(err, git.NO_STAGED_COMMIT_MESSAGE)
+
+        ok, err = git.can_commit(files({
+          conflicts = {
+            file({
+              path = 'conflict.txt',
+              kind = 'conflicted',
+              status = 'U',
+              section = 'conflicts',
+            }),
+          },
+          staged = {
+            file({
+              path = 'copy.txt',
+              kind = 'copied',
+              status = 'C',
+              section = 'staged',
+            }),
+          },
+        }))
+        A.falsy(ok)
+        A.equal(err, git.CONFLICT_COMMIT_MESSAGE)
+
+        ok, err = git.can_commit(files({
+          staged = {
+            file({
+              path = 'binary.bin',
+              kind = 'added',
+              status = 'A',
+              section = 'staged',
+              is_binary = true,
+            }),
+            file({
+              path = 'copy.txt',
+              kind = 'copied',
+              status = 'C',
+              section = 'staged',
+            }),
+            file({
+              path = 'typed.txt',
+              kind = 'type_changed',
+              status = 'T',
+              section = 'staged',
+            }),
+          },
+          changes = {
+            file({
+              path = 'typed.txt',
+              kind = 'type_changed',
+              status = 'T',
+              section = 'changes',
+            }),
+          },
+          untracked = {
+            file({
+              path = 'notes.txt',
+              kind = 'untracked',
+              status = '?',
+              section = 'untracked',
+            }),
+          },
+        }))
+        A.truthy(ok, err)
+        A.equal(err, nil)
+      end,
+    },
+    {
+      name = 'commit rejects empty messages before invoking git',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_staged', function()
+          local ok, err = git.commit({
+            '',
+            '   ',
+          }, git.get_changed_files())
+
+          A.falsy(ok)
+          A.equal(err, git.EMPTY_COMMIT_MESSAGE)
+        end)
+      end,
+    },
+    {
+      name = 'integration commit preserves multiline messages and leaves unstaged changes alone',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_mixed_mm', function(repo)
+          local message = {
+            'Stage tracked change',
+            '',
+            'Keep the unstaged tail in the worktree.',
+          }
+
+          local ok, err = git.commit(message, git.get_changed_files())
+          A.truthy(ok, err)
+
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%B' })), table.concat(message, '\n'))
+          A.equal(repo:git({ 'show', 'HEAD:' .. repo.files.tracked }), 'alpha\nbeta staged\ngamma\n')
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta staged\ngamma\nunstaged tail\n')
+
+          local changed = git.get_changed_files()
+          A.same(changed.staged, {})
+          A.length(changed.changes, 1)
+          A.equal(changed.changes[1].path, repo.files.tracked)
+        end)
+      end,
+    },
+    {
+      name = 'integration commit works in unborn HEAD repositories',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_unborn_staged_add', function(repo)
+          local ok, err = git.commit('Initial commit', git.get_changed_files())
+          A.truthy(ok, err)
+
+          A.truthy(vim.trim(repo:git({ 'rev-parse', '--verify', 'HEAD' })) ~= '')
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%s' })), 'Initial commit')
+          A.equal(vim.trim(repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })), '')
+        end)
+      end,
+    },
+    {
       name = 'integration stage and unstage round-trip modified and deleted files',
       run = function()
         local git = require('glance.git')

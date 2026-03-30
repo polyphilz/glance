@@ -146,6 +146,30 @@ local function run_git_capture_at_root_async(root, args, opts, callback)
   end)
 end
 
+local function run_git_capture_at_root(root, args, opts)
+  local cmd = { 'git', '-C', root }
+  vim.list_extend(cmd, args)
+
+  local result = vim.system(cmd, { text = true }):wait()
+  local allowed_codes = (opts and opts.allowed_codes) or { 0 }
+  local stdout = result.stdout or ''
+  local stderr = result.stderr or ''
+
+  if not vim.tbl_contains(allowed_codes, result.code) then
+    local message = vim.trim(stdout ~= '' and stdout or stderr)
+    if message == '' then
+      message = 'git command failed'
+    end
+    return false, message
+  end
+
+  if stdout ~= '' then
+    return true, stdout
+  end
+
+  return true, stderr
+end
+
 function M.run_git_capture(args, opts)
   local root = M.repo_root()
   if not root then
@@ -665,6 +689,9 @@ M.UNSUPPORTED_STAGE_MESSAGE = 'glance: stage is not supported for this git state
 M.UNSUPPORTED_UNSTAGE_MESSAGE = 'glance: unstage is not supported for this git state yet'
 M.INVALID_STAGE_TARGET_MESSAGE = 'glance: selected file is not stageable from this section'
 M.INVALID_UNSTAGE_TARGET_MESSAGE = 'glance: selected file is not unstageable from this section'
+M.NO_STAGED_COMMIT_MESSAGE = 'glance: there are no staged changes to commit'
+M.CONFLICT_COMMIT_MESSAGE = 'glance: commit is not possible while conflicts are unresolved'
+M.EMPTY_COMMIT_MESSAGE = 'glance: commit message cannot be empty'
 
 function M.infer_stage_kind(file)
   if type(file) ~= 'table' then
@@ -758,6 +785,70 @@ function M.can_unstage_file(file)
 
   if file.section ~= 'staged' then
     return false, M.INVALID_UNSTAGE_TARGET_MESSAGE
+  end
+
+  return true
+end
+
+--- Check whether the current repo state is safe for a staged-only commit.
+--- @param files table|nil
+--- @return boolean, string|nil
+function M.can_commit(files)
+  files = files or M.get_changed_files()
+  if type(files) ~= 'table' then
+    return false, 'invalid files table'
+  end
+
+  if #(files.conflicts or {}) > 0 then
+    return false, M.CONFLICT_COMMIT_MESSAGE
+  end
+
+  if #(files.staged or {}) == 0 then
+    return false, M.NO_STAGED_COMMIT_MESSAGE
+  end
+
+  return true
+end
+
+local function normalize_commit_message(message)
+  local text = ''
+
+  if type(message) == 'table' then
+    text = table.concat(message, '\n')
+  elseif type(message) == 'string' then
+    text = message
+  end
+
+  text = text:gsub('\r\n?', '\n')
+
+  local lines = vim.split(text, '\n', { plain = true })
+  while #lines > 0 and vim.trim(lines[1]) == '' do
+    table.remove(lines, 1)
+  end
+  while #lines > 0 and vim.trim(lines[#lines]) == '' do
+    table.remove(lines)
+  end
+
+  if #lines == 0 then
+    return nil, M.EMPTY_COMMIT_MESSAGE
+  end
+
+  return table.concat(lines, '\n') .. '\n'
+end
+
+local function write_commit_message_file(path, text)
+  local file, err = io.open(path, 'w')
+  if not file then
+    return false, err or 'failed to open commit message temp file'
+  end
+
+  local ok, write_err = pcall(function()
+    file:write(text)
+  end)
+  file:close()
+
+  if not ok then
+    return false, write_err
   end
 
   return true
@@ -878,6 +969,43 @@ function M.unstage_all(files)
   end
 
   return run_git({ 'reset', 'HEAD', '--', '.' })
+end
+
+--- Commit the current index with a message body written outside the repo root.
+--- @param message string|string[]
+--- @param files table|nil
+--- @return boolean, string|nil
+function M.commit(message, files)
+  local allowed, reason = M.can_commit(files)
+  if not allowed then
+    return false, reason
+  end
+
+  local normalized, message_err = normalize_commit_message(message)
+  if not normalized then
+    return false, message_err
+  end
+
+  local root = M.repo_root()
+  if not root then
+    return false, 'not a git repository'
+  end
+
+  local temp_path = vim.fn.tempname()
+  local wrote_message, write_err = write_commit_message_file(temp_path, normalized)
+  if not wrote_message then
+    pcall(vim.fn.delete, temp_path)
+    return false, tostring(write_err)
+  end
+
+  local ok, err = run_git_capture_at_root(root, { 'commit', '--file', temp_path })
+  pcall(vim.fn.delete, temp_path)
+
+  if not ok then
+    return false, err
+  end
+
+  return true
 end
 
 --- Discard all git-visible changes for a single file path.

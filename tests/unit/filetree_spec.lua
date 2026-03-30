@@ -49,7 +49,7 @@ return {
           '  [s] stage   [S] stage all',
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
-          '  drag dividers to resize',
+          '  [c] commit staged changes',
           '',
           '  Staged Changes',
           '    M staged.txt',
@@ -81,7 +81,7 @@ return {
           '  [s] stage   [S] stage all',
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
-          '  drag dividers to resize',
+          '  [c] commit staged changes',
           '',
           '  Conflicts',
           '    U conflict.txt',
@@ -152,7 +152,7 @@ return {
           '  [s] stage   [S] stage all',
           '  [u] unstage [U] unstage all',
           '  [d] discard [D] discard all',
-          '  drag dividers to resize',
+          '  [c] commit staged changes',
           '',
           '  No changes found',
         })
@@ -219,6 +219,360 @@ return {
         A.equal(filetree.status_highlight('U'), 'GlanceStatusConflict')
         A.equal(filetree.status_highlight('?'), 'GlanceStatusU')
         A.equal(filetree.status_highlight('X'), nil)
+      end,
+    },
+    {
+      name = 'open commit editor warns when there are no staged changes',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local messages, restore = N.capture_notifications()
+        local original_open = commit_editor.open
+        local open_called = false
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            changes = {
+              { path = 'changed.txt', status = 'M', section = 'changes' },
+            },
+          })
+
+          commit_editor.open = function()
+            open_called = true
+          end
+
+          filetree.open_commit_editor()
+
+          A.falsy(open_called)
+          A.equal(messages[1].msg, git.NO_STAGED_COMMIT_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+        end, debug.traceback)
+
+        restore()
+        commit_editor.open = original_open
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'open commit editor reuses an existing editor by focusing it',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local filetree = setup_filetree()
+        local original_is_open = commit_editor.is_open
+        local original_focus = commit_editor.focus
+        local original_open = commit_editor.open
+        local focus_called = false
+        local open_called = false
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+          })
+
+          commit_editor.is_open = function()
+            return true
+          end
+          commit_editor.focus = function()
+            focus_called = true
+          end
+          commit_editor.open = function()
+            open_called = true
+          end
+
+          filetree.open_commit_editor()
+
+          A.truthy(focus_called)
+          A.falsy(open_called)
+        end, debug.traceback)
+
+        commit_editor.is_open = original_is_open
+        commit_editor.focus = original_focus
+        commit_editor.open = original_open
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'successful commit closes the editor and refreshes once without an open diff',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local ui = require('glance.ui')
+        local original_open = commit_editor.open
+        local original_get_status_snapshot = git.get_status_snapshot
+        local original_can_commit = git.can_commit
+        local original_commit = git.commit
+        local original_refresh = filetree.refresh
+        local submit
+        local commit_message
+        local refresh_calls = 0
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+          })
+
+          commit_editor.open = function(opts)
+            submit = opts.on_submit
+          end
+          git.get_status_snapshot = function()
+            return snapshot({
+              staged = {
+                { path = 'staged.txt', status = 'M', section = 'staged' },
+              },
+            }, {
+              key = 'submit',
+            })
+          end
+          git.can_commit = function()
+            return true
+          end
+          git.commit = function(message_lines)
+            commit_message = message_lines
+            return true
+          end
+          filetree.refresh = function()
+            refresh_calls = refresh_calls + 1
+          end
+
+          ui.diff_open = false
+          filetree.open_commit_editor()
+          submit({ 'Subject', '', 'Body' })
+
+          A.same(commit_message, { 'Subject', '', 'Body' })
+          A.equal(refresh_calls, 1)
+        end, debug.traceback)
+
+        commit_editor.open = original_open
+        git.get_status_snapshot = original_get_status_snapshot
+        git.can_commit = original_can_commit
+        git.commit = original_commit
+        filetree.refresh = original_refresh
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'successful commit closes any open diff without double-refreshing',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local diffview = require('glance.diffview')
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local ui = require('glance.ui')
+        local original_open = commit_editor.open
+        local original_diff_close = diffview.close
+        local original_get_status_snapshot = git.get_status_snapshot
+        local original_can_commit = git.can_commit
+        local original_commit = git.commit
+        local original_refresh = filetree.refresh
+        local submit
+        local diff_close_force
+        local refresh_calls = 0
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+          })
+
+          commit_editor.open = function(opts)
+            submit = opts.on_submit
+          end
+          diffview.close = function(force)
+            diff_close_force = force
+            ui.diff_open = false
+          end
+          git.get_status_snapshot = function()
+            return snapshot({
+              staged = {
+                { path = 'staged.txt', status = 'M', section = 'staged' },
+              },
+            }, {
+              key = 'submit',
+            })
+          end
+          git.can_commit = function()
+            return true
+          end
+          git.commit = function()
+            return true
+          end
+          filetree.refresh = function()
+            refresh_calls = refresh_calls + 1
+          end
+
+          ui.diff_open = true
+          filetree.open_commit_editor()
+          submit({ 'Subject' })
+
+          A.equal(diff_close_force, false)
+          A.equal(refresh_calls, 0)
+        end, debug.traceback)
+
+        commit_editor.open = original_open
+        diffview.close = original_diff_close
+        git.get_status_snapshot = original_get_status_snapshot
+        git.can_commit = original_can_commit
+        git.commit = original_commit
+        filetree.refresh = original_refresh
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'successful commit keeps an open diff and refreshes when diff close is aborted',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local diffview = require('glance.diffview')
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local ui = require('glance.ui')
+        local original_open = commit_editor.open
+        local original_diff_close = diffview.close
+        local original_get_status_snapshot = git.get_status_snapshot
+        local original_can_commit = git.can_commit
+        local original_commit = git.commit
+        local original_refresh = filetree.refresh
+        local submit
+        local diff_close_force
+        local refresh_calls = 0
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+          })
+
+          commit_editor.open = function(opts)
+            submit = opts.on_submit
+          end
+          diffview.close = function(force)
+            diff_close_force = force
+          end
+          git.get_status_snapshot = function()
+            return snapshot({
+              staged = {},
+              changes = {
+                { path = 'staged.txt', status = 'M', section = 'changes' },
+              },
+            }, {
+              key = 'submit',
+            })
+          end
+          git.can_commit = function()
+            return true
+          end
+          git.commit = function()
+            return true
+          end
+          filetree.refresh = function()
+            refresh_calls = refresh_calls + 1
+          end
+
+          ui.diff_open = true
+          filetree.open_commit_editor()
+          submit({ 'Subject' })
+
+          A.equal(diff_close_force, false)
+          A.equal(refresh_calls, 1)
+          A.truthy(ui.diff_open)
+        end, debug.traceback)
+
+        commit_editor.open = original_open
+        diffview.close = original_diff_close
+        git.get_status_snapshot = original_get_status_snapshot
+        git.can_commit = original_can_commit
+        git.commit = original_commit
+        filetree.refresh = original_refresh
+        ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'failed commit keeps the editor open and reports the git error',
+      run = function()
+        local commit_editor = require('glance.commit_editor')
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local messages, restore = N.capture_notifications()
+        local original_open = commit_editor.open
+        local original_get_status_snapshot = git.get_status_snapshot
+        local original_can_commit = git.can_commit
+        local original_commit = git.commit
+        local original_refresh = filetree.refresh
+        local submit
+        local refresh_called = false
+
+        local ok, err = xpcall(function()
+          filetree.render({
+            staged = {
+              { path = 'staged.txt', status = 'M', section = 'staged' },
+            },
+          })
+
+          commit_editor.open = function(opts)
+            submit = opts.on_submit
+          end
+          git.get_status_snapshot = function()
+            return snapshot({
+              staged = {
+                { path = 'staged.txt', status = 'M', section = 'staged' },
+              },
+            }, {
+              key = 'submit',
+            })
+          end
+          git.can_commit = function()
+            return true
+          end
+          git.commit = function()
+            return false, 'hook rejected'
+          end
+          filetree.refresh = function()
+            refresh_called = true
+          end
+
+          filetree.open_commit_editor()
+          submit({ 'Subject' })
+
+          A.falsy(refresh_called)
+          A.equal(messages[1].msg, 'glance: failed to commit staged changes: hook rejected')
+          A.equal(messages[1].level, vim.log.levels.ERROR)
+        end, debug.traceback)
+
+        restore()
+        commit_editor.open = original_open
+        git.get_status_snapshot = original_get_status_snapshot
+        git.can_commit = original_can_commit
+        git.commit = original_commit
+        filetree.refresh = original_refresh
+
+        if not ok then
+          error(err)
+        end
       end,
     },
     {

@@ -80,6 +80,7 @@ return {
             next_section = 'J',
             prev_section = 'K',
             toggle_filetree = '<Tab>',
+            commit = 'c',
             stage_file = 's',
             stage_all = 'S',
             unstage_file = 'u',
@@ -150,6 +151,7 @@ return {
           },
           keymaps = {
             quit = 'x',
+            commit = 'm',
             stage_file = 'g',
             discard_file = 'z',
           },
@@ -173,6 +175,7 @@ return {
         A.equal(config.options.pane_navigation.left, 'H')
         A.equal(config.options.pane_navigation.right, nil)
         A.equal(config.options.keymaps.quit, 'x')
+        A.equal(config.options.keymaps.commit, 'm')
         A.equal(config.options.keymaps.stage_file, 'g')
         A.equal(config.options.keymaps.stage_all, 'S')
         A.equal(config.options.keymaps.unstage_file, 'u')
@@ -434,14 +437,14 @@ return {
         local ok, err = pcall(function()
           config.setup({
             keymaps = {
-              stage_file = 'd',
-              discard_file = 'd',
+              stage_file = 'c',
+              commit = 'c',
             },
           })
         end)
 
         A.falsy(ok)
-        A.match(err, 'keymaps%.discard_file conflicts with keymaps%.stage_file')
+        A.match(err, 'keymaps%.stage_file conflicts with keymaps%.commit')
       end,
     },
   },

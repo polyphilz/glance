@@ -213,26 +213,27 @@ end
 local function add_legend(lines, highlights)
   local km = config.options.keymaps
   local title = '  actions'
+  local commit_line = '  [' .. km.commit .. '] commit staged changes'
   local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
   local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
   local discard_line = '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all'
-  local resize_hint = '  drag dividers to resize'
 
   lines[#lines + 1] = title
   lines[#lines + 1] = stage_line
   lines[#lines + 1] = unstage_line
   lines[#lines + 1] = discard_line
-  lines[#lines + 1] = resize_hint
+  lines[#lines + 1] = commit_line
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
   add_highlight(highlights, 2, 0, #stage_line, 'GlanceLegendText')
   add_highlight(highlights, 3, 0, #unstage_line, 'GlanceLegendText')
   add_highlight(highlights, 4, 0, #discard_line, 'GlanceLegendText')
+  add_highlight(highlights, 5, 0, #commit_line, 'GlanceLegendText')
   add_legend_key_highlights(highlights, 2, stage_line)
   add_legend_key_highlights(highlights, 3, unstage_line)
   add_legend_key_highlights(highlights, 4, discard_line)
-  add_highlight(highlights, 5, 0, #resize_hint, 'GlanceLegendHint')
+  add_legend_key_highlights(highlights, 5, commit_line)
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -705,6 +706,22 @@ local function notify_discard_all_error(err)
   vim.notify('glance: failed to discard all changes: ' .. tostring(err), vim.log.levels.ERROR)
 end
 
+local function commit_error_is_validation(err)
+  local git = require('glance.git')
+  return err == git.NO_STAGED_COMMIT_MESSAGE
+    or err == git.CONFLICT_COMMIT_MESSAGE
+    or err == git.EMPTY_COMMIT_MESSAGE
+end
+
+local function notify_commit_error(err)
+  if commit_error_is_validation(err) then
+    vim.notify(err, vim.log.levels.WARN)
+    return
+  end
+
+  vim.notify('glance: failed to commit staged changes: ' .. tostring(err), vim.log.levels.ERROR)
+end
+
 local function refresh_after_discard(active_file)
   local ui = require('glance.ui')
   M.refresh()
@@ -892,6 +909,52 @@ function M.unstage_all()
   M.refresh()
 end
 
+function M.open_commit_editor()
+  local commit_editor = require('glance.commit_editor')
+  if commit_editor.is_open() then
+    commit_editor.focus()
+    return
+  end
+
+  local git = require('glance.git')
+  local allowed, err = git.can_commit(M.files)
+  if not allowed then
+    notify_commit_error(err)
+    return
+  end
+
+  commit_editor.open({
+    on_submit = function(message_lines)
+      local snapshot = git.get_status_snapshot()
+      local can_submit, submit_err = git.can_commit(snapshot.files)
+      if not can_submit then
+        notify_commit_error(submit_err)
+        return false
+      end
+
+      local ok, commit_err = git.commit(message_lines, snapshot.files)
+      if not ok then
+        notify_commit_error(commit_err)
+        return false
+      end
+
+      local ui = require('glance.ui')
+      if ui.diff_open then
+        require('glance.diffview').close(false)
+        if ui.diff_open then
+          M.refresh()
+        end
+      else
+        M.refresh()
+      end
+
+      return true
+    end,
+    on_cancel = function()
+    end,
+  })
+end
+
 --- Set up buffer-local keymaps for the file tree.
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
@@ -906,6 +969,7 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.quit, function() vim.cmd('qa!') end, opts)
   vim.keymap.set('n', km.refresh, function() M.refresh() end, opts)
   vim.keymap.set('n', km.toggle_filetree, function() M.toggle() end, opts)
+  vim.keymap.set('n', km.commit, function() M.open_commit_editor() end, opts)
   vim.keymap.set('n', km.stage_file, function() M.stage_selected_file() end, opts)
   vim.keymap.set('n', km.stage_all, function() M.stage_all() end, opts)
   vim.keymap.set('n', km.unstage_file, function() M.unstage_selected_file() end, opts)

@@ -25,6 +25,7 @@ Launch a clean review UI for staged, unstaged, untracked, and conflicted files w
 - Single file tree for staged, unstaged, untracked, and conflicted files.
 - Side-by-side diffs with a minimap and live file reloads.
 - Filetree actions to stage, unstage, or discard one file or the whole repo.
+- Filetree commit flow for staged changes with a multi-line floating commit editor.
 - Safe discard actions for one file or all repo changes, both with confirmation prompts.
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
 
@@ -146,6 +147,7 @@ Default keys:
 | `S` | Stage all supported repo changes |
 | `u` | Unstage the selected file |
 | `U` | Unstage all supported staged changes |
+| `c` | Commit the staged set in a floating editor |
 | `d` | Discard the selected file after confirmation |
 | `D` | Discard all repo changes after confirmation |
 

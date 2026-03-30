@@ -17,6 +17,7 @@ return {
           local saw_stage_all = false
           local saw_unstage = false
           local saw_unstage_all = false
+          local saw_commit = false
           local saw_discard = false
           local saw_discard_all = false
 
@@ -29,6 +30,8 @@ return {
               saw_unstage = true
             elseif map.lhs == 'U' then
               saw_unstage_all = true
+            elseif map.lhs == 'c' then
+              saw_commit = true
             elseif map.lhs == 'd' then
               saw_discard = true
             elseif map.lhs == 'D' then
@@ -43,6 +46,7 @@ return {
           A.truthy(saw_stage_all)
           A.truthy(saw_unstage)
           A.truthy(saw_unstage_all)
+          A.truthy(saw_commit)
           A.truthy(saw_discard)
           A.truthy(saw_discard_all)
           A.same(lines, {
@@ -50,7 +54,7 @@ return {
             '  [s] stage   [S] stage all',
             '  [u] unstage [U] unstage all',
             '  [d] discard [D] discard all',
-            '  drag dividers to resize',
+            '  [c] commit staged changes',
           })
           A.equal(filetree.selected_line, 8)
           A.equal(selected.path, repo.files.tracked)
@@ -257,6 +261,206 @@ return {
             return entry.path
           end, changed.changes), other_path))
           A.same(changed.staged, {})
+        end)
+      end,
+    },
+    {
+      name = 'commit records only the staged index and preserves a multiline message',
+      run = function()
+        N.with_repo('repo_mixed_mm', function(repo)
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+
+          vim.api.nvim_set_current_win(filetree.win)
+          N.press('c')
+          A.truthy(commit_editor.is_open())
+
+          vim.api.nvim_buf_set_lines(commit_editor.buf, 0, -1, false, {
+            'Stage tracked change',
+            '',
+            'Keep the unstaged tail in the worktree.',
+          })
+          vim.api.nvim_buf_call(commit_editor.buf, function()
+            vim.cmd('write')
+          end)
+
+          N.wait(200, function()
+            return not commit_editor.is_open()
+          end)
+          A.falsy(commit_editor.is_open())
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%B' })), table.concat({
+            'Stage tracked change',
+            '',
+            'Keep the unstaged tail in the worktree.',
+          }, '\n'))
+          A.equal(repo:git({ 'show', 'HEAD:' .. repo.files.tracked }), 'alpha\nbeta staged\ngamma\n')
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta staged\ngamma\nunstaged tail\n')
+
+          local changed = git.get_changed_files()
+          A.same(changed.staged, {})
+          A.length(changed.changes, 1)
+          A.equal(changed.changes[1].path, repo.files.tracked)
+          A.equal(filetree.files.changes[1].path, repo.files.tracked)
+        end)
+      end,
+    },
+    {
+      name = 'commit works in an unborn HEAD repository',
+      run = function()
+        N.with_repo('repo_unborn_staged_add', function(repo)
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+
+          vim.api.nvim_set_current_win(filetree.win)
+          N.press('c')
+          A.truthy(commit_editor.is_open())
+
+          vim.api.nvim_buf_set_lines(commit_editor.buf, 0, -1, false, {
+            'Initial commit',
+          })
+          vim.api.nvim_buf_call(commit_editor.buf, function()
+            vim.cmd('write')
+          end)
+
+          N.wait(200, function()
+            return not commit_editor.is_open()
+          end)
+          A.falsy(commit_editor.is_open())
+          A.truthy(vim.trim(repo:git({ 'rev-parse', '--verify', 'HEAD' })) ~= '')
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%s' })), 'Initial commit')
+          A.equal(vim.trim(repo:git({ 'status', '--porcelain=v1', '--untracked-files=all' })), '')
+        end)
+      end,
+    },
+    {
+      name = 'commit does not silently discard unsaved edits from an open diff buffer',
+      run = function()
+        N.with_repo('repo_mixed_mm', function(repo)
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local diffview = require('glance.diffview')
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          ui.open_file(filetree.files.changes[1])
+          vim.api.nvim_buf_set_lines(diffview.new_buf, 0, -1, false, {
+            'scratch unsaved edit',
+          })
+
+          vim.api.nvim_set_current_win(filetree.win)
+          N.press('c')
+          A.truthy(commit_editor.is_open())
+
+          vim.api.nvim_buf_set_lines(commit_editor.buf, 0, -1, false, {
+            'Keep diff edits',
+          })
+
+          N.with_confirm(3, function()
+            vim.api.nvim_buf_call(commit_editor.buf, function()
+              vim.cmd('write')
+            end)
+          end)
+
+          N.wait(200, function()
+            return not commit_editor.is_open()
+          end)
+          A.falsy(commit_editor.is_open())
+          A.truthy(ui.diff_open)
+          A.truthy(vim.api.nvim_buf_is_valid(diffview.new_buf))
+          A.same(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), {
+            'scratch unsaved edit',
+          })
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%s' })), 'Keep diff edits')
+          A.equal(repo:read(repo.files.tracked), 'alpha\nbeta staged\ngamma\nunstaged tail\n')
+          A.equal(filetree.files.changes[1].path, repo.files.tracked)
+        end)
+      end,
+    },
+    {
+      name = 'x submits the commit buffer without closing Glance',
+      run = function()
+        N.with_repo('repo_staged', function(repo)
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+
+          local tree_win = filetree.win
+          local tree_buf = filetree.buf
+
+          vim.api.nvim_set_current_win(filetree.win)
+          N.press('c')
+          A.truthy(commit_editor.is_open())
+
+          vim.api.nvim_buf_set_lines(commit_editor.buf, 0, -1, false, {
+            'Submit with x',
+          })
+          vim.api.nvim_buf_call(commit_editor.buf, function()
+            vim.cmd('x')
+          end)
+
+          N.wait(200, function()
+            return not commit_editor.is_open()
+          end)
+
+          A.truthy(vim.api.nvim_win_is_valid(tree_win))
+          A.equal(vim.api.nvim_get_current_win(), tree_win)
+          A.equal(vim.api.nvim_get_current_buf(), tree_buf)
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%s' })), 'Submit with x')
+        end)
+      end,
+    },
+    {
+      name = 'commit warns and does not open the editor when nothing is staged',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+          local messages, restore = N.capture_notifications()
+
+          local ok, err = xpcall(function()
+            vim.api.nvim_set_current_win(filetree.win)
+            N.press('c')
+          end, debug.traceback)
+
+          restore()
+          if not ok then
+            error(err, 0)
+          end
+
+          A.falsy(commit_editor.is_open())
+          A.equal(messages[1].msg, git.NO_STAGED_COMMIT_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
+        end)
+      end,
+    },
+    {
+      name = 'commit warns and does not open the editor when conflicts are unresolved',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+          local git = require('glance.git')
+          local messages, restore = N.capture_notifications()
+
+          local ok, err = xpcall(function()
+            vim.api.nvim_set_current_win(filetree.win)
+            N.press('c')
+          end, debug.traceback)
+
+          restore()
+          if not ok then
+            error(err, 0)
+          end
+
+          A.falsy(commit_editor.is_open())
+          A.equal(messages[1].msg, git.CONFLICT_COMMIT_MESSAGE)
+          A.equal(messages[1].level, vim.log.levels.WARN)
         end)
       end,
     },

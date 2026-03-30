@@ -23,6 +23,12 @@ local function delete_buffer(buf)
   end
 end
 
+local function close_window(win)
+  if win and vim.api.nvim_win_is_valid(win) then
+    pcall(vim.api.nvim_win_close, win, true)
+  end
+end
+
 local function reset_loaded_modules()
   for name in pairs(package.loaded) do
     if name == 'glance' or name:match('^glance%.') then
@@ -34,6 +40,7 @@ end
 --- Reset Glance module state, windows, buffers, and autocmds between tests.
 function M.reset()
   local loaded = package.loaded
+  local commit_editor = loaded['glance.commit_editor']
   local diffview = loaded['glance.diffview']
   local filetree = loaded['glance.filetree']
   local minimap = loaded['glance.minimap']
@@ -51,6 +58,7 @@ function M.reset()
   end
 
   clear_group(diffview and diffview.autocmd_group)
+  clear_group('GlanceCommitEditor')
   clear_group(minimap and minimap.augroup)
   clear_group('GlanceApp')
 
@@ -62,7 +70,9 @@ function M.reset()
   pcall(vim.cmd, 'silent! enew!')
   pcall(vim.cmd, 'silent! only')
 
+  close_window(commit_editor and commit_editor.win)
   delete_buffer(minimap and minimap.buf)
+  delete_buffer(commit_editor and commit_editor.buf)
   delete_buffer(ui and ui.welcome_buf)
   delete_buffer(diffview and diffview.old_buf)
   delete_buffer(diffview and diffview.new_buf)
@@ -88,6 +98,15 @@ function M.reset()
     filetree.repo_head_oid = nil
     filetree.repo_snapshot_key = ''
     filetree.repo_status_output = ''
+  end
+
+  if commit_editor then
+    commit_editor.buf = nil
+    commit_editor.win = nil
+    commit_editor.on_submit = nil
+    commit_editor.on_cancel = nil
+    commit_editor.closing = false
+    commit_editor.suppress_win_closed = false
   end
 
   if minimap then
