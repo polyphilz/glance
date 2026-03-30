@@ -51,25 +51,6 @@ Launch a clean review UI for staged, unstaged, and untracked files without touch
    curl -fsSL https://raw.githubusercontent.com/polyphilz/glance/main/install.sh | bash
    ```
 
-   The installer creates `~/.local/bin/glance`. If `glance` is not found after install, run:
-
-   ```bash
-   case ":$PATH:" in
-     *":$HOME/.local/bin:"*) echo "~/.local/bin already on PATH" ;;
-     *)
-       case "${SHELL##*/}" in
-         zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
-         bash) rc="$HOME/.bashrc" ;;
-         *) rc="$HOME/.profile" ;;
-       esac
-       line='export PATH="$HOME/.local/bin:$PATH"'
-       grep -qxF "$line" "$rc" 2>/dev/null || printf '\n%s\n' "$line" >> "$rc"
-       export PATH="$HOME/.local/bin:$PATH"
-       echo "Added ~/.local/bin to PATH in $rc"
-       ;;
-   esac
-   ```
-
 3. Optional: create a starter config file:
 
    ```bash
@@ -84,8 +65,6 @@ Launch a clean review UI for staged, unstaged, and untracked files without touch
    cd /path/to/repo
    glance
    ```
-
-Glance launches its own `nvim --clean` session and loads only the bundled runtime. Your existing Neovim config is not required.
 
 ## Requirements
 
@@ -292,7 +271,24 @@ Notes:
 <summary><strong>Troubleshooting</strong></summary>
 
 - **`glance: command not found`**
-  `~/.local/bin` is probably not on your `PATH`.
+  `~/.local/bin` is probably not on your `PATH`. Run this to fix it:
+
+  ```bash
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) echo "~/.local/bin already on PATH" ;;
+    *)
+      case "${SHELL##*/}" in
+        zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
+        bash) rc="$HOME/.bashrc" ;;
+        *) rc="$HOME/.profile" ;;
+      esac
+      line='export PATH="$HOME/.local/bin:$PATH"'
+      grep -qxF "$line" "$rc" 2>/dev/null || printf '\n%s\n' "$line" >> "$rc"
+      export PATH="$HOME/.local/bin:$PATH"
+      echo "Added ~/.local/bin to PATH in $rc"
+      ;;
+  esac
+  ```
 
 - **`glance: not a git repository`**
   Glance only runs inside a Git work tree.
