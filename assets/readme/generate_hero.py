@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--mask-distance", type=float, default=86.0)
     parser.add_argument("--logo-padding", type=int, default=25)
-    parser.add_argument("--logo-color", type=str, default="#F2E94B")
+    parser.add_argument("--logo-color", type=str, default="#FD971F")
     parser.add_argument("--star-color", type=str, default="#FFFFFF")
     parser.add_argument("--skip-mask-export", action="store_true")
     return parser.parse_args()

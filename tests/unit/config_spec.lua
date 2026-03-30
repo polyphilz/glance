@@ -32,7 +32,7 @@ return {
               accent = '#FD971F',
               selection = '#444444',
               line_highlight = '#333333',
-              logo = '#F2E94B',
+              logo = '#FD971F',
               added = '#2ea043',
               deleted = '#f85149',
               changed = '#d29922',
@@ -212,7 +212,7 @@ return {
         A.equal(config.options.theme.palette.bg, '#FAFAFA')
         A.equal(config.options.theme.palette.fg, '#383A42')
         A.equal(config.options.theme.palette.statusline_bg, '#EAEAEB')
-        A.equal(config.options.theme.palette.logo, '#526FFF')
+        A.equal(config.options.theme.palette.logo, '#FD971F')
         A.equal(config.options.theme.palette.minimap_cursor, '#111111')
         A.equal(config.options.theme.palette.split_hover, '#526FFF')
         A.equal(config.options.theme.palette.deleted_old, '#F4CCC8')

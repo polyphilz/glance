@@ -46,7 +46,7 @@ end
 function M.setup_welcome_highlights(palette)
   local base = (palette and palette.base) or '#677A83'
   local bright = (palette and palette.bright) or '#D7D7D7'
-  local logo = (palette and palette.logo) or '#F2E94B'
+  local logo = (palette and palette.logo) or '#FD971F'
 
   vim.api.nvim_set_hl(0, 'GlanceWelcomeLogo', {
     fg = logo,
