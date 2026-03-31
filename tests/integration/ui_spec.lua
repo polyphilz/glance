@@ -101,6 +101,9 @@ return {
             open = diffview.open,
             open_deleted = diffview.open_deleted,
             open_untracked = diffview.open_untracked,
+            open_binary = diffview.open_binary,
+            open_copied = diffview.open_copied,
+            open_type_changed = diffview.open_type_changed,
             open_conflict = diffview.open_conflict,
             open_placeholder = diffview.open_placeholder,
             close = diffview.close,
@@ -114,6 +117,15 @@ return {
           end
           diffview.open_untracked = function(file)
             calls[#calls + 1] = 'untracked:' .. file.path
+          end
+          diffview.open_binary = function(file)
+            calls[#calls + 1] = 'binary:' .. file.path
+          end
+          diffview.open_copied = function(file)
+            calls[#calls + 1] = 'copied:' .. file.path
+          end
+          diffview.open_type_changed = function(file)
+            calls[#calls + 1] = 'type_changed:' .. file.path
           end
           diffview.open_conflict = function(file)
             calls[#calls + 1] = 'conflict:' .. file.path
@@ -153,6 +165,9 @@ return {
           diffview.open = original.open
           diffview.open_deleted = original.open_deleted
           diffview.open_untracked = original.open_untracked
+          diffview.open_binary = original.open_binary
+          diffview.open_copied = original.open_copied
+          diffview.open_type_changed = original.open_type_changed
           diffview.open_conflict = original.open_conflict
           diffview.open_placeholder = original.open_placeholder
           diffview.close = original.close
@@ -163,10 +178,10 @@ return {
             'open:staged-add.txt',
             'untracked:worktree-add.txt',
             'conflict:conflict.txt',
-            'placeholder:type_changed:typed.txt:nil',
-            'placeholder:copied:copied.txt:nil',
+            'type_changed:typed.txt',
+            'copied:copied.txt',
             'placeholder:unsupported:mystery.txt:nil',
-            'placeholder:modified:binary.bin:binary diff not supported yet',
+            'binary:binary.bin',
           })
           A.equal(ui.welcome_win, nil)
         end)

@@ -802,6 +802,200 @@ function M.ensure_file_binary(file)
   return is_binary
 end
 
+local function cat_file_size(ref, path)
+  if type(path) ~= 'string' or path == '' then
+    return nil
+  end
+
+  local object = ref == ':' and (':' .. path) or (ref .. ':' .. path)
+  local ok, output = M.run_git_capture({ 'cat-file', '-s', object }, {
+    allowed_codes = { 0, 128 },
+  })
+  if not ok then
+    return nil
+  end
+
+  return tonumber(vim.trim(output))
+end
+
+local function mode_to_type(mode)
+  if mode == '100644' or mode == '100755' then
+    return 'regular file'
+  end
+  if mode == '120000' then
+    return 'symlink'
+  end
+  if mode == '160000' then
+    return 'submodule'
+  end
+  return 'unknown'
+end
+
+local function stat_type_to_type(stat_type)
+  if stat_type == 'file' then
+    return 'regular file'
+  end
+  if stat_type == 'link' then
+    return 'symlink'
+  end
+  if stat_type == 'directory' then
+    return 'directory'
+  end
+  return 'unknown'
+end
+
+local function first_mode_field(output)
+  local line = split_lines(output)[1]
+  if type(line) ~= 'string' or line == '' then
+    return nil
+  end
+
+  return line:match('^(%d+)')
+end
+
+local function trimmed_output(output)
+  local text = vim.trim(output or '')
+  if text == '' then
+    return nil
+  end
+  return text
+end
+
+local function has_copy_summary(output)
+  for line in (output or ''):gmatch('[^\n]+') do
+    local lower = line:lower()
+    if lower:match('^%s*copy ')
+      or lower:find('copy from', 1, true)
+      or lower:find('copy to', 1, true)
+      or lower:find('similarity index', 1, true)
+    then
+      return true
+    end
+  end
+
+  return false
+end
+
+function M.get_binary_info(file)
+  local info = {
+    old_size = nil,
+    new_size = nil,
+  }
+
+  if type(file) ~= 'table' then
+    return info
+  end
+
+  local root = M.repo_root()
+  local old_path = file.old_path or file.path
+
+  if file.section == 'staged' then
+    info.old_size = cat_file_size('HEAD', old_path)
+    info.new_size = cat_file_size(':', file.path)
+    return info
+  end
+
+  if file.section == 'changes' then
+    info.old_size = cat_file_size(':', old_path)
+    if root then
+      local stat = vim.uv.fs_stat(root .. '/' .. file.path)
+      info.new_size = stat and stat.size or nil
+    end
+    return info
+  end
+
+  if file.section == 'untracked' or file.kind == 'untracked' then
+    if root then
+      local stat = vim.uv.fs_stat(root .. '/' .. file.path)
+      info.new_size = stat and stat.size or nil
+    end
+  end
+
+  return info
+end
+
+function M.get_diff_stat(file)
+  if type(file) ~= 'table' then
+    return ''
+  end
+
+  local args
+  if file.section == 'staged' then
+    args = { 'diff', '--cached', '--stat', '--summary', '--find-copies-harder', '--' }
+  elseif file.section == 'changes' then
+    args = { 'diff', '--stat', '--summary', '--find-copies-harder', '--' }
+  else
+    return ''
+  end
+
+  vim.list_extend(args, M.entry_paths(file))
+  local ok, output = M.run_git_capture(args, { allowed_codes = { 0, 1 } })
+  if not ok then
+    return ''
+  end
+
+  local text = trimmed_output(output)
+  if not text or not has_copy_summary(text) then
+    return ''
+  end
+
+  return text
+end
+
+function M.get_type_change_info(file)
+  local info = {
+    old_type = 'unknown',
+    new_type = 'unknown',
+    diff_text = nil,
+  }
+
+  if type(file) ~= 'table' then
+    return info
+  end
+
+  local old_path = file.old_path or file.path
+  local ok_old, old_output = M.run_git_capture({ 'ls-tree', 'HEAD', '--', old_path }, {
+    allowed_codes = { 0, 128 },
+  })
+  if ok_old then
+    info.old_type = mode_to_type(first_mode_field(old_output))
+  end
+
+  if file.section == 'staged' then
+    local ok_new, new_output = M.run_git_capture({ 'ls-files', '-s', '--', file.path }, {
+      allowed_codes = { 0 },
+    })
+    if ok_new then
+      info.new_type = mode_to_type(first_mode_field(new_output))
+    end
+  else
+    local root = M.repo_root()
+    if root then
+      local stat = vim.uv.fs_lstat(root .. '/' .. file.path)
+      if stat then
+        info.new_type = stat_type_to_type(stat.type)
+      end
+    end
+  end
+
+  local diff_args
+  if file.section == 'staged' then
+    diff_args = { 'diff', '--cached', '--' }
+  elseif file.section == 'changes' then
+    diff_args = { 'diff', '--' }
+  end
+
+  if diff_args then
+    vim.list_extend(diff_args, M.entry_paths(file))
+    local ok_diff, diff_output = M.run_git_capture(diff_args, { allowed_codes = { 0, 1 } })
+    if ok_diff then
+      info.diff_text = trimmed_output(diff_output)
+    end
+  end
+
+  return info
+end
+
 M.UNSUPPORTED_DISCARD_MESSAGE = 'glance: discard is not supported for this git state yet'
 M.UNSUPPORTED_STAGE_MESSAGE = 'glance: stage is not supported for this git state yet'
 M.UNSUPPORTED_UNSTAGE_MESSAGE = 'glance: unstage is not supported for this git state yet'

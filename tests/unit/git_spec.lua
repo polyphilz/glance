@@ -1285,6 +1285,128 @@ return {
       end,
     },
     {
+      name = 'get_binary_info reports sizes for visible binary states and degrades without HEAD',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_binary', function(repo)
+          local changed = git.get_changed_files()
+          A.same(git.get_binary_info(changed.untracked[1]), {
+            old_size = nil,
+            new_size = #repo:read(repo.files.binary),
+          })
+        end)
+
+        N.with_repo('repo_binary_staged_add', function(repo)
+          local changed = git.get_changed_files()
+          A.same(git.get_binary_info(changed.staged[1]), {
+            old_size = nil,
+            new_size = #repo:read(repo.files.binary),
+          })
+        end)
+
+        N.with_repo('repo_binary_modified', function(repo)
+          local changed = git.get_changed_files()
+          A.same(git.get_binary_info(changed.changes[1]), {
+            old_size = #repo:read(repo.files.binary),
+            new_size = #repo:read(repo.files.binary),
+          })
+        end)
+
+        N.with_repo('repo_unborn_clean', function(repo)
+          repo.files.binary = 'assets/unborn.bin'
+          repo:write(repo.files.binary, string.char(0, 1, 2), 'wb')
+          repo:stage(repo.files.binary)
+
+          local changed = git.get_changed_files()
+          A.same(git.get_binary_info(changed.staged[1]), {
+            old_size = nil,
+            new_size = 3,
+          })
+        end)
+      end,
+    },
+    {
+      name = 'get_diff_stat keeps copy-aware summaries and filters plain create output',
+      run = function()
+        local git = require('glance.git')
+        local original = git.run_git_capture
+        local calls = {}
+
+        local ok, err = xpcall(function()
+          git.run_git_capture = function(args)
+            calls[#calls + 1] = vim.deepcopy(args)
+            if #calls == 1 then
+              return true, table.concat({
+                'copy original.txt => copy.txt (100%)',
+                '1 file changed, 0 insertions(+), 0 deletions(-)',
+              }, '\n')
+            end
+
+            return true, table.concat({
+              'copy.txt | 0',
+              '1 file changed, 0 insertions(+), 0 deletions(-)',
+              'create mode 100644 copy.txt',
+            }, '\n')
+          end
+
+          A.contains(git.get_diff_stat({
+            section = 'staged',
+            path = 'copy.txt',
+            old_path = 'original.txt',
+          }), 'copy original.txt => copy.txt (100%)')
+          A.equal(git.get_diff_stat({
+            section = 'staged',
+            path = 'copy.txt',
+            old_path = 'original.txt',
+          }), '')
+
+          A.same(calls[1], {
+            'diff',
+            '--cached',
+            '--stat',
+            '--summary',
+            '--find-copies-harder',
+            '--',
+            'original.txt',
+            'copy.txt',
+          })
+        end, debug.traceback)
+
+        git.run_git_capture = original
+        if not ok then
+          error(err, 0)
+        end
+      end,
+    },
+    {
+      name = 'get_type_change_info reports old and new filesystem types for staged and unstaged changes',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_type_change', function()
+          local changed = git.get_changed_files()
+          local info = git.get_type_change_info(changed.changes[1])
+
+          A.equal(info.old_type, 'regular file')
+          A.equal(info.new_type, 'symlink')
+          A.truthy(info.diff_text and info.diff_text ~= '')
+        end)
+
+        N.with_repo('repo_type_change', function(repo)
+          repo:stage(repo.files.tracked)
+
+          local changed = git.get_changed_files()
+          A.length(changed.staged, 1)
+
+          local info = git.get_type_change_info(changed.staged[1])
+          A.equal(info.old_type, 'regular file')
+          A.equal(info.new_type, 'symlink')
+          A.truthy(info.diff_text and info.diff_text ~= '')
+        end)
+      end,
+    },
+    {
       name = 'integration handles newline stability and lazily resolves untracked binary state',
       run = function()
         N.with_repo('repo_binary', function(repo)

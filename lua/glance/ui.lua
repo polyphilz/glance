@@ -518,7 +518,7 @@ function M.open_file(file)
   M.close_welcome()
 
   if is_binary then
-    diffview.open_placeholder(file, 'binary diff not supported yet')
+    diffview.open_binary(file)
   elseif kind == 'deleted' then
     diffview.open_deleted(file)
   elseif kind == 'untracked' then
@@ -527,7 +527,11 @@ function M.open_file(file)
     diffview.open_untracked(file)
   elseif kind == 'conflicted' then
     diffview.open_conflict(file)
-  elseif kind == 'copied' or kind == 'type_changed' or kind == 'unsupported' then
+  elseif kind == 'copied' then
+    diffview.open_copied(file)
+  elseif kind == 'type_changed' then
+    diffview.open_type_changed(file)
+  elseif kind == 'unsupported' then
     diffview.open_placeholder(file)
   else
     diffview.open(file)

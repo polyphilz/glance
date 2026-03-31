@@ -84,6 +84,7 @@ return {
           local filetree = require('glance.filetree')
           local diffview = require('glance.diffview')
           local minimap = require('glance.minimap')
+          local conflict_ns = vim.api.nvim_create_namespace('glance_conflict')
 
           ui.open_file(filetree.files.conflicts[1])
 
@@ -92,17 +93,67 @@ return {
           A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), '')
           A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), false)
           A.equal(vim.api.nvim_get_option_value('diff', { win = diffview.new_win }), false)
+          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.new_win }), 'Conflict: unresolved markers')
           A.equal(minimap.win, nil)
+          A.truthy(#vim.api.nvim_buf_get_extmarks(diffview.new_buf, conflict_ns, 0, -1, {}) > 0)
 
           local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
           A.contains(text, '<<<<<<<')
           A.contains(text, '=======')
           A.contains(text, '>>>>>>>')
+
+          local keymaps = vim.api.nvim_buf_get_keymap(diffview.new_buf, 'n')
+          local found_next = false
+          local found_prev = false
+          for _, map in ipairs(keymaps) do
+            if map.lhs == ']x' then
+              found_next = true
+            elseif map.lhs == '[x' then
+              found_prev = true
+            end
+          end
+          A.truthy(found_next)
+          A.truthy(found_prev)
         end)
       end,
     },
     {
-      name = 'type-changed files open a placeholder instead of a diff',
+      name = 'conflict navigation keymaps jump to unresolved markers',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+
+          ui.open_file(filetree.files.conflicts[1])
+          vim.api.nvim_set_current_win(diffview.new_win)
+
+          local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
+          local marker_line
+          for index, line in ipairs(lines) do
+            if line:match('^<<<<<<<') then
+              marker_line = index
+              break
+            end
+          end
+
+          A.truthy(marker_line)
+
+          vim.api.nvim_win_set_cursor(diffview.new_win, { #lines, 0 })
+          N.press(']x')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
+          N.press(']x')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
+
+          vim.api.nvim_win_set_cursor(diffview.new_win, { #lines, 0 })
+          N.press('[x')
+          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
+        end)
+      end,
+    },
+    {
+      name = 'type-changed files open a metadata panel instead of a diff',
       run = function()
         N.with_repo('repo_type_change', function()
           require('glance').start()
@@ -121,14 +172,14 @@ return {
           A.equal(minimap.win, nil)
 
           local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
-          A.contains(text, 'Kind: type_changed')
-          A.contains(text, 'Raw status:  T')
-          A.contains(text, 'type-changed entries are not supported yet')
+          A.contains(text, 'Type Changed')
+          A.contains(text, 'regular file → symlink')
+          A.contains(text, 'Unstaged')
         end)
       end,
     },
     {
-      name = 'binary entries open a placeholder instead of a text diff',
+      name = 'binary entries open a metadata panel instead of a text diff',
       run = function()
         N.with_repo('repo_binary_staged_add', function(repo)
           require('glance').start()
@@ -143,24 +194,83 @@ return {
           A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
           A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), 'nofile')
           A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), true)
+          A.equal(vim.api.nvim_get_option_value('modifiable', { buf = diffview.new_buf }), false)
           A.equal(vim.api.nvim_get_option_value('diff', { win = diffview.new_win }), false)
           A.equal(minimap.win, nil)
 
           local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
-          A.contains(text, 'Path: ' .. repo.files.binary)
-          A.contains(text, 'Raw status: A ')
-          A.contains(text, 'binary diff not supported yet')
+          A.contains(text, 'Binary File')
+          A.contains(text, repo.files.binary)
+          A.contains(text, 'Staged')
+          A.contains(text, 'Old size   —')
+          A.match(text, 'New size   %d+ B')
+        end)
+      end,
+    },
+    {
+      name = 'copied entries open a metadata panel when rendered directly',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local diffview = require('glance.diffview')
+          local git = require('glance.git')
+          local original = git.get_diff_stat
+
+          git.get_diff_stat = function()
+            return table.concat({
+              'copy original.txt => copy.txt (100%)',
+              '1 file changed, 0 insertions(+), 0 deletions(-)',
+            }, '\n')
+          end
+
+          local ok, err = xpcall(function()
+            diffview.open_copied({
+              path = 'copy.txt',
+              old_path = 'original.txt',
+              section = 'staged',
+              status = 'C',
+              kind = 'copied',
+            })
+
+            A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), 'nofile')
+            A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), true)
+
+            local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
+            A.contains(text, 'Copied File')
+            A.contains(text, 'original.txt → copy.txt')
+            A.contains(text, '  copy original.txt => copy.txt (100%)')
+          end, debug.traceback)
+
+          git.get_diff_stat = original
+          if not ok then
+            error(err, 0)
+          end
         end)
       end,
     },
     {
       name = 'staged rename uses old path content in the left pane',
       run = function()
-        N.with_repo('repo_rename', function()
+        N.with_repo('repo_rename', function(repo)
           require('glance').start()
           local diffview = open_first_changed()
 
           A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), { 'rename me' })
+          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.old_win }), 'Old: ' .. repo.files.renamed_old)
+          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.new_win }), 'New: ' .. repo.files.renamed_new)
+        end)
+      end,
+    },
+    {
+      name = 'unstaged rename keeps old-path baseline and visible path labels',
+      run = function()
+        N.with_repo('repo_unstaged_rename', function(repo)
+          require('glance').start()
+          local diffview = open_first_changed()
+
+          A.same(vim.api.nvim_buf_get_lines(diffview.old_buf, 0, -1, false), { 'rename me' })
+          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.old_win }), 'Old: ' .. repo.files.renamed_old)
+          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.new_win }), 'New: ' .. repo.files.renamed_new)
         end)
       end,
     },
