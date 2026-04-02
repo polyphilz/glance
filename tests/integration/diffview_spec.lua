@@ -8,6 +8,37 @@ local function open_first_changed()
   return require('glance.diffview')
 end
 
+local function open_custom_workspace(role_specs, opts)
+  opts = opts or {}
+
+  require('glance').start()
+  local diffview = require('glance.diffview')
+  local ui = require('glance.ui')
+
+  ui.close_welcome()
+  ui.diff_open = true
+  diffview.configure_workspace({
+    roles = role_specs,
+    preferred_focus_role = opts.preferred_focus_role,
+    editable_role = opts.editable_role,
+  })
+
+  local wins = {}
+  local bufs = {}
+  for _, spec in ipairs(role_specs) do
+    if spec.kind == 'content' then
+      local win, buf = diffview.open_workspace_pane(spec.role)
+      wins[spec.role] = win
+      bufs[spec.role] = buf
+      pcall(vim.api.nvim_buf_set_name, buf, 'glance://' .. spec.role)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { spec.role })
+    end
+  end
+
+  diffview.equalize_panes()
+  return diffview, wins, bufs
+end
+
 return {
   name = 'diffview',
   cases = {
@@ -370,6 +401,82 @@ return {
 
           A.truthy(hidden_width > visible_width)
           A.truthy(has_toggle)
+        end)
+      end,
+    },
+    {
+      name = 'workspace helpers include a third content pane without special casing old/new',
+      run = function()
+        N.with_repo('repo_modified', function()
+          local diffview, wins, bufs = open_custom_workspace({
+            { role = 'filetree', kind = 'sidebar' },
+            { role = 'merge_theirs', kind = 'content' },
+            { role = 'merge_ours', kind = 'content' },
+            { role = 'merge_result', kind = 'content' },
+          }, {
+            preferred_focus_role = 'merge_result',
+            editable_role = 'merge_result',
+          })
+          local filetree = require('glance.filetree')
+
+          A.same(diffview.content_roles(), {
+            'merge_theirs',
+            'merge_ours',
+            'merge_result',
+          })
+          A.same(diffview.content_wins(), {
+            wins.merge_theirs,
+            wins.merge_ours,
+            wins.merge_result,
+          })
+          A.equal(diffview.editable_buf(), bufs.merge_result)
+          A.same(diffview.hoverable_separator_wins(), {
+            filetree.win,
+            wins.merge_theirs,
+            wins.merge_ours,
+          })
+
+          vim.api.nvim_set_current_win(wins.merge_theirs)
+          A.truthy(diffview.focus_content_pane())
+          A.equal(vim.api.nvim_get_current_win(), wins.merge_result)
+
+          local visible_width = vim.api.nvim_win_get_width(wins.merge_theirs)
+          filetree.toggle()
+          diffview.equalize_panes()
+          local hidden_width = vim.api.nvim_win_get_width(wins.merge_theirs)
+
+          A.truthy(hidden_width > visible_width)
+        end)
+      end,
+    },
+    {
+      name = 'close cleans up every registered content pane in a custom workspace',
+      run = function()
+        N.with_repo('repo_modified', function()
+          local diffview, wins, bufs = open_custom_workspace({
+            { role = 'filetree', kind = 'sidebar' },
+            { role = 'merge_theirs', kind = 'content' },
+            { role = 'merge_ours', kind = 'content' },
+            { role = 'merge_result', kind = 'content' },
+          }, {
+            preferred_focus_role = 'merge_result',
+            editable_role = 'merge_result',
+          })
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+
+          diffview.close(true)
+
+          A.falsy(ui.diff_open)
+          A.truthy(filetree.win and vim.api.nvim_win_is_valid(filetree.win))
+          A.truthy(ui.welcome_win and vim.api.nvim_win_is_valid(ui.welcome_win))
+
+          for _, win in pairs(wins) do
+            A.falsy(vim.api.nvim_win_is_valid(win))
+          end
+          for _, buf in pairs(bufs) do
+            A.falsy(vim.api.nvim_buf_is_valid(buf))
+          end
         end)
       end,
     },

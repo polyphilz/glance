@@ -171,15 +171,17 @@ end
 
 local function new_buffer_is_modified()
   local diffview = require('glance.diffview')
-  if not diffview.new_buf or not vim.api.nvim_buf_is_valid(diffview.new_buf) then
+  local buf = diffview.editable_buf()
+
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return false
   end
 
-  if vim.api.nvim_buf_get_option(diffview.new_buf, 'buftype') ~= '' then
+  if vim.api.nvim_buf_get_option(buf, 'buftype') ~= '' then
     return false
   end
 
-  return vim.api.nvim_buf_get_option(diffview.new_buf, 'modified')
+  return vim.api.nvim_buf_get_option(buf, 'modified')
 end
 
 local function snap_to_nearest_file(line, prefer_up)
@@ -627,12 +629,7 @@ function M.toggle()
 
     diffview.equalize_panes()
 
-    -- Return focus to a diff pane
-    if diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win) then
-      vim.api.nvim_set_current_win(diffview.new_win)
-    elseif diffview.old_win and vim.api.nvim_win_is_valid(diffview.old_win) then
-      vim.api.nvim_set_current_win(diffview.old_win)
-    end
+    diffview.focus_content_pane()
   end
 end
 

@@ -2,20 +2,75 @@ local git = require('glance.git')
 local config = require('glance.config')
 local filetree = require('glance.filetree')
 local pane_navigation = require('glance.pane_navigation')
+local workspace = require('glance.workspace')
 
-local M = {}
+local FILETREE_ROLE = 'filetree'
+local OLD_ROLE = 'diff_old'
+local NEW_ROLE = 'diff_new'
+local COMPAT_ALIAS = {
+  old_buf = { role = OLD_ROLE, field = 'buf' },
+  old_win = { role = OLD_ROLE, field = 'win' },
+  new_buf = { role = NEW_ROLE, field = 'buf' },
+  new_win = { role = NEW_ROLE, field = 'win' },
+}
+
+local function default_workspace_spec()
+  return {
+    roles = {
+      { role = FILETREE_ROLE, kind = 'sidebar' },
+      { role = OLD_ROLE, kind = 'content' },
+      { role = NEW_ROLE, kind = 'content' },
+    },
+    preferred_focus_role = NEW_ROLE,
+    editable_role = NEW_ROLE,
+  }
+end
+
+local state = {
+  workspace = workspace.new(vim.tbl_extend('force', { name = 'diffview' }, default_workspace_spec())),
+}
+local M = setmetatable({
+  fs_watcher = nil,
+  closing = false,
+  autocmd_group = vim.api.nvim_create_augroup('GlanceDiffView', { clear = true }),
+}, {
+  __index = function(_, key)
+    local alias = COMPAT_ALIAS[key]
+    if alias then
+      if alias.field == 'buf' then
+        return workspace.get_buf(state.workspace, alias.role)
+      end
+      return workspace.get_win(state.workspace, alias.role)
+    end
+
+    if key == 'workspace' then
+      return state.workspace
+    end
+
+    return rawget(_, key)
+  end,
+  __newindex = function(_, key, value)
+    local alias = COMPAT_ALIAS[key]
+    if alias then
+      if alias.field == 'buf' then
+        workspace.set_buf(state.workspace, alias.role, value)
+      else
+        workspace.set_win(state.workspace, alias.role, value)
+      end
+      return
+    end
+
+    if key == 'workspace' then
+      state.workspace = value
+      return
+    end
+
+    rawset(_, key, value)
+  end,
+})
 local PANEL_NS = vim.api.nvim_create_namespace('glance_panel')
 local DELETED_NS = vim.api.nvim_create_namespace('glance_deleted')
 local CONFLICT_NS = vim.api.nvim_create_namespace('glance_conflict')
-
--- State
-M.old_buf = nil
-M.old_win = nil
-M.new_buf = nil
-M.new_win = nil
-M.fs_watcher = nil
-M.closing = false
-M.autocmd_group = vim.api.nvim_create_augroup('GlanceDiffView', { clear = true })
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -33,16 +88,90 @@ local function watch_options()
   return config.options.watch
 end
 
+local function sync_filetree_pane()
+  workspace.set_win(M.workspace, FILETREE_ROLE, filetree.win)
+  workspace.set_buf(M.workspace, FILETREE_ROLE, filetree.buf)
+end
+
+local function pane_win(role)
+  return workspace.get_win(M.workspace, role)
+end
+
+local function pane_buf(role)
+  return workspace.get_buf(M.workspace, role)
+end
+
+local function content_roles()
+  return workspace.collect_roles(M.workspace, {
+    filter = function(_, _, role_def)
+      return role_def.kind == 'content'
+    end,
+  })
+end
+
+local function content_windows()
+  return workspace.collect_windows(M.workspace, {
+    valid_win = true,
+    filter = function(_, _, role_def)
+      return role_def.kind == 'content'
+    end,
+  })
+end
+
+local function rightmost_anchor_win()
+  local wins = content_windows()
+  if #wins > 0 then
+    return wins[#wins]
+  end
+  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
+    return filetree.win
+  end
+  return nil
+end
+
 local function resize_filetree()
+  sync_filetree_pane()
   vim.api.nvim_win_set_width(filetree.win, filetree_options().width)
   vim.api.nvim_win_set_option(filetree.win, 'winfixwidth', filetree_options().winfixwidth)
 end
 
-local function open_single_pane()
-  vim.api.nvim_set_current_win(filetree.win)
+function M.configure_workspace(spec)
+  workspace.configure(M.workspace, spec or default_workspace_spec())
+  sync_filetree_pane()
+end
+
+function M.restore_default_workspace()
+  M.configure_workspace(default_workspace_spec())
+end
+
+function M.open_workspace_pane(role)
+  workspace.register_role(M.workspace, role, { kind = 'content' })
+  local anchor = rightmost_anchor_win()
+  if anchor and vim.api.nvim_win_is_valid(anchor) then
+    vim.api.nvim_set_current_win(anchor)
+  end
   vim.cmd('rightbelow vnew')
-  M.new_win = vim.api.nvim_get_current_win()
-  M.set_win_options(M.new_win)
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  workspace.set_pane(M.workspace, role, {
+    win = win,
+    buf = buf,
+  })
+  M.set_win_options(win)
+  return win, buf
+end
+
+local function open_content_pane(role)
+  return M.open_workspace_pane(role)
+end
+
+local function open_single_pane()
+  return open_content_pane(NEW_ROLE)
+end
+
+local function prepare_default_workspace()
+  M.restore_default_workspace()
+  resize_filetree()
 end
 
 local function placeholder_message(file, override)
@@ -323,15 +452,12 @@ function M.open(file)
 
   local old_lines = git.get_file_content(old_content_path(file), old_content_ref(file))
 
-  -- Resize file tree
-  resize_filetree()
+  prepare_default_workspace()
 
   -- Create the old (left) pane: vertical split to the right of file tree
-  vim.api.nvim_set_current_win(filetree.win)
-  vim.cmd('rightbelow vnew')
-  M.old_win = vim.api.nvim_get_current_win()
+  open_content_pane(OLD_ROLE)
+  M.old_win = pane_win(OLD_ROLE)
   local scratch_buf = vim.api.nvim_get_current_buf()
-  M.set_win_options(M.old_win)
 
   -- Set up old buffer: write to temp file with correct extension so
   -- syntax highlighting works identically to the right pane via edit
@@ -356,9 +482,8 @@ function M.open(file)
   vim.api.nvim_buf_set_option(M.old_buf, 'swapfile', false)
 
   -- Create the new (right) pane: vertical split to the right of old pane
-  vim.cmd('rightbelow vnew')
-  M.new_win = vim.api.nvim_get_current_win()
-  M.set_win_options(M.new_win)
+  open_content_pane(NEW_ROLE)
+  M.new_win = pane_win(NEW_ROLE)
 
   -- Open the actual file on disk (editable)
   local full_path = root .. '/' .. file.path
@@ -438,8 +563,7 @@ function M.open_deleted(file)
 
   local lines = git.get_file_content(file.path, old_ref)
 
-  -- Resize file tree
-  resize_filetree()
+  prepare_default_workspace()
 
   -- Create a single pane
   open_single_pane()
@@ -467,8 +591,7 @@ function M.open_untracked(file)
   local root = git.repo_root()
   if not root then return end
 
-  -- Resize file tree
-  resize_filetree()
+  prepare_default_workspace()
 
   -- Create a single pane and open the file
   open_single_pane()
@@ -491,7 +614,7 @@ function M.open_conflict(file)
   local root = git.repo_root()
   if not root then return end
 
-  resize_filetree()
+  prepare_default_workspace()
   open_single_pane()
 
   local full_path = root .. '/' .. file.path
@@ -525,7 +648,7 @@ end
 --- @param file table
 --- @param message string|nil
 function M.open_placeholder(file, message)
-  resize_filetree()
+  prepare_default_workspace()
   open_single_pane()
   M.new_buf = vim.api.nvim_get_current_buf()
 
@@ -539,7 +662,7 @@ function M.open_placeholder(file, message)
 end
 
 function M.open_binary(file)
-  resize_filetree()
+  prepare_default_workspace()
   open_single_pane()
   M.new_buf = vim.api.nvim_get_current_buf()
 
@@ -553,7 +676,7 @@ function M.open_binary(file)
 end
 
 function M.open_copied(file)
-  resize_filetree()
+  prepare_default_workspace()
   open_single_pane()
   M.new_buf = vim.api.nvim_get_current_buf()
 
@@ -567,7 +690,7 @@ function M.open_copied(file)
 end
 
 function M.open_type_changed(file)
-  resize_filetree()
+  prepare_default_workspace()
   open_single_pane()
   M.new_buf = vim.api.nvim_get_current_buf()
 
@@ -581,14 +704,17 @@ function M.open_type_changed(file)
 end
 
 local function check_new_buffer()
-  if not M.new_buf or not vim.api.nvim_buf_is_valid(M.new_buf) then
+  local buf = M.editable_buf()
+  local win = M.editable_win()
+
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return
   end
-  if not M.new_win or not vim.api.nvim_win_is_valid(M.new_win) then
+  if not win or not vim.api.nvim_win_is_valid(win) then
     return
   end
 
-  vim.api.nvim_win_call(M.new_win, function()
+  vim.api.nvim_win_call(win, function()
     vim.cmd('silent! checktime')
   end)
 end
@@ -617,36 +743,24 @@ function M.stop_watching()
 end
 
 local function collect_view_buffers()
-  local bufs = {}
-  if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
-    table.insert(bufs, M.old_buf)
-  end
-  if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
-    table.insert(bufs, M.new_buf)
-  end
-  return bufs
+  return workspace.collect_buffers(M.workspace, {
+    valid_buf = true,
+    filter = function(_, _, role_def)
+      return role_def.kind == 'content'
+    end,
+  })
 end
 
 local function collect_diff_buffers()
-  local bufs = {}
-
-  local function add_if_diff(buf, win)
-    if not buf or not win then
-      return
-    end
-    if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then
-      return
-    end
-    if not vim.api.nvim_get_option_value('diff', { win = win }) then
-      return
-    end
-    table.insert(bufs, buf)
-  end
-
-  add_if_diff(M.old_buf, M.old_win)
-  add_if_diff(M.new_buf, M.new_win)
-
-  return bufs
+  return workspace.collect_buffers(M.workspace, {
+    valid_buf = true,
+    filter = function(_, pane, role_def)
+      return role_def.kind == 'content'
+        and pane.win ~= nil
+        and vim.api.nvim_win_is_valid(pane.win)
+        and vim.api.nvim_get_option_value('diff', { win = pane.win })
+    end,
+  })
 end
 
 local function set_buffer_keymap(buf, lhs, rhs)
@@ -690,9 +804,7 @@ function M.setup_autocmds(file)
   vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
 
   -- Track which windows belong to the diff view
-  local diff_wins = {}
-  if M.old_win then table.insert(diff_wins, M.old_win) end
-  if M.new_win then table.insert(diff_wins, M.new_win) end
+  local diff_wins = content_windows()
 
   -- When any diff window is closed, close them all and return to file tree
   vim.api.nvim_create_autocmd('WinClosed', {
@@ -713,11 +825,13 @@ function M.setup_autocmds(file)
     end,
   })
 
-  -- When the new buffer is saved, refresh the diff
-  if M.new_buf and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == '' then
+  local editable_buf = M.editable_buf()
+
+  -- When the workspace's editable buffer is saved, refresh the diff.
+  if editable_buf and vim.api.nvim_buf_get_option(editable_buf, 'buftype') == '' then
       vim.api.nvim_create_autocmd('FileChangedShellPost', {
         group = M.autocmd_group,
-        buffer = M.new_buf,
+        buffer = editable_buf,
         callback = function()
           vim.schedule(function()
             M.refresh(file)
@@ -728,7 +842,7 @@ function M.setup_autocmds(file)
 
       vim.api.nvim_create_autocmd('BufWritePost', {
         group = M.autocmd_group,
-        buffer = M.new_buf,
+        buffer = editable_buf,
         callback = function()
           vim.schedule(function()
             M.refresh(file)
@@ -739,6 +853,86 @@ function M.setup_autocmds(file)
   end
 end
 
+function M.content_roles()
+  return content_roles()
+end
+
+function M.editable_role()
+  return workspace.get_editable_role(M.workspace) or content_roles()[#content_roles()]
+end
+
+function M.editable_buf()
+  local role = M.editable_role()
+  return role and pane_buf(role) or nil
+end
+
+function M.editable_win()
+  local role = M.editable_role()
+  return role and pane_win(role) or nil
+end
+
+function M.preferred_focus_role()
+  return workspace.get_preferred_focus_role(M.workspace) or M.editable_role()
+end
+
+function M.content_wins()
+  return content_windows()
+end
+
+function M.hoverable_separator_wins()
+  sync_filetree_pane()
+
+  local wins = {}
+  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
+    wins[#wins + 1] = filetree.win
+  end
+
+  local content = content_windows()
+  for i = 1, math.max(#content - 1, 0) do
+    wins[#wins + 1] = content[i]
+  end
+
+  return wins
+end
+
+function M.focus_content_pane()
+  local role = M.preferred_focus_role()
+  local win = role and pane_win(role) or nil
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_set_current_win(win)
+    return true
+  end
+
+  local wins = content_windows()
+  if #wins > 0 then
+    vim.api.nvim_set_current_win(wins[#wins])
+    return true
+  end
+
+  return false
+end
+
+function M.primary_edit_role()
+  return M.editable_role()
+end
+
+function M.primary_buf()
+  return M.editable_buf()
+end
+
+function M.primary_win()
+  return M.editable_win()
+end
+
+function M.focus_preferred_pane()
+  return M.focus_content_pane()
+end
+
+function M.reset_workspace()
+  workspace.clear(M.workspace)
+  sync_filetree_pane()
+end
+
 --- Clean up diff windows and buffers, return to file tree.
 --- @param force boolean|nil  If true, discard unsaved changes. Otherwise prompt.
 function M.close(force)
@@ -747,96 +941,91 @@ function M.close(force)
   end
   M.closing = true
   local discard_new_changes = force == true
+  local editable_buf = M.editable_buf()
+  local editable_win = M.editable_win()
 
-  -- Check for unsaved changes in the new (editable) buffer before closing
+  -- Check for unsaved changes in the workspace's editable buffer before closing.
   if not force
-    and M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf)
-    and vim.api.nvim_buf_get_option(M.new_buf, 'buftype') == ''
-    and vim.api.nvim_buf_get_option(M.new_buf, 'modified')
+    and editable_buf and vim.api.nvim_buf_is_valid(editable_buf)
+    and vim.api.nvim_buf_get_option(editable_buf, 'buftype') == ''
+    and vim.api.nvim_buf_get_option(editable_buf, 'modified')
   then
-    -- Focus the new pane so the user sees the modified buffer
-    if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
-      vim.api.nvim_set_current_win(M.new_win)
+    if editable_win and vim.api.nvim_win_is_valid(editable_win) then
+      vim.api.nvim_set_current_win(editable_win)
     end
+
     local choice = vim.fn.confirm(
       'Save changes?',
       '&Yes\n&No\n&Cancel', 3
     )
     if choice == 1 then
-      vim.api.nvim_buf_call(M.new_buf, function() vim.cmd('write') end)
+      vim.api.nvim_buf_call(editable_buf, function() vim.cmd('write') end)
     elseif choice == 3 or choice == 0 then
       M.closing = false
-      return -- abort close
+      return
     else
       discard_new_changes = true
     end
-    -- choice == 2: discard changes, continue closing
   end
 
   local old_lazyredraw = vim.o.lazyredraw
   local ok, err = xpcall(function()
-    -- Suppress redraws during close to prevent filetree flash
     vim.o.lazyredraw = true
 
-    -- Close minimap first (before closing diff windows)
     local minimap = require('glance.minimap')
     minimap.close()
 
     M.stop_watching()
     vim.api.nvim_clear_autocmds({ group = M.autocmd_group })
 
-    -- Turn off diff mode in any remaining diff windows
     local function safe_diffoff(win)
       if win and vim.api.nvim_win_is_valid(win) then
         vim.api.nvim_set_current_win(win)
         vim.cmd('diffoff')
       end
     end
-    safe_diffoff(M.old_win)
-    safe_diffoff(M.new_win)
 
-    -- Restore filetree window before closing diff panes, so we never
-    -- try to close the last window (E444)
+    for _, win in ipairs(content_windows()) do
+      safe_diffoff(win)
+    end
+
     if not filetree.win or not vim.api.nvim_win_is_valid(filetree.win) then
       vim.cmd('topleft vnew')
-      local new_win = vim.api.nvim_get_current_win()
+      local restored_win = vim.api.nvim_get_current_win()
       local scratch_buf = vim.api.nvim_get_current_buf()
-      vim.api.nvim_win_set_buf(new_win, filetree.buf)
+      vim.api.nvim_win_set_buf(restored_win, filetree.buf)
       if vim.api.nvim_buf_is_valid(scratch_buf) and scratch_buf ~= filetree.buf then
         vim.api.nvim_buf_delete(scratch_buf, { force = true })
       end
-      filetree.win = new_win
+      filetree.win = restored_win
     end
+    sync_filetree_pane()
 
-    -- Close old pane window and buffer
-    if M.old_win and vim.api.nvim_win_is_valid(M.old_win) then
-      vim.api.nvim_win_close(M.old_win, true)
-    end
-    if M.old_buf and vim.api.nvim_buf_is_valid(M.old_buf) then
-      vim.api.nvim_buf_delete(M.old_buf, { force = true })
-    end
+    for _, role in ipairs(content_roles()) do
+      local win = pane_win(role)
+      local buf = pane_buf(role)
 
-    -- Close the editable pane window, then clean up the backing buffer if Glance
-    -- is the last owner. This prevents hidden modified buffers from being reused.
-    if M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
-      vim.api.nvim_win_close(M.new_win, true)
-    end
-    if M.new_buf and vim.api.nvim_buf_is_valid(M.new_buf) then
-      local buftype = vim.api.nvim_buf_get_option(M.new_buf, 'buftype')
-      local visible_elsewhere = vim.fn.bufwinid(M.new_buf) ~= -1
-      if buftype == 'nofile' or not visible_elsewhere then
-        vim.api.nvim_buf_delete(M.new_buf, {
-          force = discard_new_changes or buftype == 'nofile',
-        })
+      if win and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+
+      if buf and vim.api.nvim_buf_is_valid(buf) then
+        if role == M.editable_role() then
+          local buftype = vim.api.nvim_buf_get_option(buf, 'buftype')
+          local visible_elsewhere = vim.fn.bufwinid(buf) ~= -1
+          if buftype == 'nofile' or not visible_elsewhere then
+            vim.api.nvim_buf_delete(buf, {
+              force = discard_new_changes or buftype == 'nofile',
+            })
+          end
+        else
+          vim.api.nvim_buf_delete(buf, { force = true })
+        end
       end
     end
 
-    M.old_buf = nil
-    M.old_win = nil
-    M.new_buf = nil
-    M.new_win = nil
+    M.reset_workspace()
 
-    -- Return to file tree
     local ui = require('glance.ui')
     ui.close_diff()
   end, debug.traceback)
@@ -919,6 +1108,7 @@ end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.
 function M.equalize_panes()
+  sync_filetree_pane()
   local tree_visible = filetree.win and vim.api.nvim_win_is_valid(filetree.win)
   local tree_width = 0
 
@@ -927,15 +1117,15 @@ function M.equalize_panes()
     vim.api.nvim_win_set_width(filetree.win, tree_width)
   end
 
-  -- Count separators: 1 if tree visible, plus 1 if two diff panes
-  local separators = (tree_visible and 1 or 0)
+  local wins = content_windows()
+  if #wins > 1 then
+    local separators = (tree_visible and 1 or 0) + (#wins - 1)
+    local remaining = math.max(vim.o.columns - tree_width - separators, #wins)
+    local pane_width = math.max(math.floor(remaining / #wins), 1)
 
-  if M.old_win and vim.api.nvim_win_is_valid(M.old_win) and
-     M.new_win and vim.api.nvim_win_is_valid(M.new_win) then
-    -- Two diff panes: split remaining space evenly
-    separators = separators + 1
-    local remaining = vim.o.columns - tree_width - separators
-    vim.api.nvim_win_set_width(M.old_win, math.floor(remaining / 2))
+    for i = 1, #wins - 1 do
+      vim.api.nvim_win_set_width(wins[i], pane_width)
+    end
   end
 end
 
