@@ -1,6 +1,7 @@
 **/.plans
 **/.notes/
 **/.nvimlog
+nvim.log
 **/.DS_Store
 **/.pyc
 **/.venv/

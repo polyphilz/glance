@@ -107,7 +107,7 @@ return {
       end,
     },
     {
-      name = 'conflicted files open a single editable pane with conflict markers',
+      name = 'conflicted files open a 3-pane merge inspector with a clean result projection',
       run = function()
         N.with_repo('repo_conflict', function()
           require('glance').start()
@@ -115,71 +115,291 @@ return {
           local filetree = require('glance.filetree')
           local diffview = require('glance.diffview')
           local minimap = require('glance.minimap')
-          local conflict_ns = vim.api.nvim_create_namespace('glance_conflict')
+          local workspace = require('glance.workspace')
 
           ui.open_file(filetree.files.conflicts[1])
 
-          A.equal(diffview.old_win, nil)
-          A.truthy(diffview.new_win and vim.api.nvim_win_is_valid(diffview.new_win))
-          A.equal(vim.api.nvim_get_option_value('buftype', { buf = diffview.new_buf }), '')
-          A.equal(vim.api.nvim_get_option_value('readonly', { buf = diffview.new_buf }), false)
-          A.equal(vim.api.nvim_get_option_value('diff', { win = diffview.new_win }), false)
-          A.equal(vim.api.nvim_get_option_value('winbar', { win = diffview.new_win }), 'Conflict: unresolved markers')
+          local theirs_win = workspace.get_win(diffview.workspace, 'merge_theirs')
+          local ours_win = workspace.get_win(diffview.workspace, 'merge_ours')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          local theirs_buf = workspace.get_buf(diffview.workspace, 'merge_theirs')
+          local ours_buf = workspace.get_buf(diffview.workspace, 'merge_ours')
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+
+          A.same(diffview.content_roles(), {
+            'merge_theirs',
+            'merge_ours',
+            'merge_result',
+          })
+          A.truthy(theirs_win and vim.api.nvim_win_is_valid(theirs_win))
+          A.truthy(ours_win and vim.api.nvim_win_is_valid(ours_win))
+          A.truthy(result_win and vim.api.nvim_win_is_valid(result_win))
+          A.equal(vim.api.nvim_get_option_value('diff', { win = theirs_win }), false)
+          A.equal(vim.api.nvim_get_option_value('diff', { win = ours_win }), false)
+          A.equal(vim.api.nvim_get_option_value('diff', { win = result_win }), false)
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = theirs_buf }), 'nofile')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = theirs_buf }), true)
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = ours_buf }), 'nofile')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = ours_buf }), true)
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = result_buf }), '')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = result_buf }), false)
+          A.equal(vim.api.nvim_get_option_value('modifiable', { buf = result_buf }), true)
           A.equal(minimap.win, nil)
-          A.truthy(#vim.api.nvim_buf_get_extmarks(diffview.new_buf, conflict_ns, 0, -1, {}) > 0)
-
-          local text = table.concat(vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false), '\n')
-          A.contains(text, '<<<<<<<')
-          A.contains(text, '=======')
-          A.contains(text, '>>>>>>>')
-
-          local keymaps = vim.api.nvim_buf_get_keymap(diffview.new_buf, 'n')
-          local found_next = false
-          local found_prev = false
-          for _, map in ipairs(keymaps) do
-            if map.lhs == ']x' then
-              found_next = true
-            elseif map.lhs == '[x' then
-              found_prev = true
-            end
-          end
-          A.truthy(found_next)
-          A.truthy(found_prev)
+          A.same(vim.api.nvim_buf_get_lines(theirs_buf, 0, -1, false), { 'feature' })
+          A.same(vim.api.nvim_buf_get_lines(ours_buf, 0, -1, false), { 'main' })
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'base' })
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = theirs_win }), 'Theirs | stage 3 | MERGE_HEAD')
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = ours_win }), 'Ours | stage 2 | HEAD')
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), 'Result | 1 unresolved')
+          A.equal(vim.api.nvim_get_current_win(), result_win)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 1)
         end)
       end,
     },
     {
-      name = 'conflict navigation keymaps jump to unresolved markers',
+      name = 'merge refresh preserves unsaved result edits',
       run = function()
         N.with_repo('repo_conflict', function()
           require('glance').start()
           local ui = require('glance.ui')
           local filetree = require('glance.filetree')
           local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
 
           ui.open_file(filetree.files.conflicts[1])
-          vim.api.nvim_set_current_win(diffview.new_win)
 
-          local lines = vim.api.nvim_buf_get_lines(diffview.new_buf, 0, -1, false)
-          local marker_line
-          for index, line in ipairs(lines) do
-            if line:match('^<<<<<<<') then
-              marker_line = index
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, {
+            'manual draft line 1',
+            'manual draft line 2',
+          })
+
+          diffview.refresh(filetree.files.conflicts[1])
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), {
+            'manual draft line 1',
+            'manual draft line 2',
+          })
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), true)
+        end)
+      end,
+    },
+    {
+      name = 'add/add conflicts stay visible and navigable even when the result projection is empty',
+      run = function()
+        N.with_repo('repo_conflict_add_add', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          local theirs_win = workspace.get_win(diffview.workspace, 'merge_theirs')
+          local merge_ns = vim.api.nvim_get_namespaces().glance_merge
+          local marks = vim.api.nvim_buf_get_extmarks(result_buf, merge_ns, 0, -1, { details = true })
+
+          A.truthy(#marks > 0)
+          A.equal(vim.api.nvim_get_current_win(), result_win)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 1)
+
+          vim.api.nvim_set_current_win(theirs_win)
+          N.press(']x')
+          A.equal(vim.api.nvim_get_current_win(), result_win)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 1)
+        end)
+      end,
+    },
+    {
+      name = 'merge writes preserve the clean result buffer while persisting unresolved marker form to disk',
+      run = function()
+        N.with_repo('repo_conflict_multi', function(repo)
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          local expected_result = {
+            'intro updated',
+            'first main',
+            'gap one adjusted',
+            'gap two',
+            'gap three',
+            'second base',
+            'outro updated',
+          }
+
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, expected_result)
+          vim.api.nvim_buf_call(result_buf, function()
+            vim.cmd('write')
+          end)
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), expected_result)
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), false)
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), 'Result | 1 unresolved')
+          A.equal(repo:read(repo.files.tracked), table.concat({
+            'intro updated',
+            'first main',
+            'gap one adjusted',
+            'gap two',
+            'gap three',
+            '<<<<<<< Ours',
+            'second main',
+            '||||||| Base',
+            'second base',
+            '=======',
+            'second feature',
+            '>>>>>>> Theirs',
+            'outro updated',
+            '',
+          }, '\n'))
+
+          diffview.close(true)
+          ui.open_file(filetree.files.conflicts[1])
+
+          local reopened_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          A.same(vim.api.nvim_buf_get_lines(reopened_buf, 0, -1, false), expected_result)
+        end)
+      end,
+    },
+    {
+      name = 'merge writes preserve no-trailing-newline state',
+      run = function()
+        N.with_repo('repo_conflict_noeol', function(repo)
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          A.equal(vim.api.nvim_get_option_value('endofline', { buf = result_buf }), false)
+
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { 'main' })
+          vim.api.nvim_set_option_value('endofline', false, { buf = result_buf })
+          vim.api.nvim_buf_call(result_buf, function()
+            vim.cmd('write')
+          end)
+
+          A.equal(repo:read(repo.files.tracked), 'main')
+          A.equal(vim.api.nvim_get_option_value('endofline', { buf = result_buf }), false)
+        end)
+      end,
+    },
+    {
+      name = 'merge writes persist a fully resolved clean result without conflict markers',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { 'main' })
+
+          vim.api.nvim_buf_call(result_buf, function()
+            vim.cmd('write')
+          end)
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'main' })
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), false)
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), 'Result | 0 unresolved')
+          A.equal(repo:read(repo.files.tracked), 'main\n')
+        end)
+      end,
+    },
+    {
+      name = 'merge writes fail closed for unresolved manual result edits that cannot be serialized safely',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+          local messages, restore_notify = N.capture_notifications()
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, {
+            'custom unresolved draft',
+            'with extra context',
+          })
+
+          vim.api.nvim_buf_call(result_buf, function()
+            vim.cmd('write')
+          end)
+
+          restore_notify()
+
+          local warned = false
+          for _, entry in ipairs(messages) do
+            if entry.msg:find('cannot safely', 1, true) then
+              warned = true
               break
             end
           end
 
-          A.truthy(marker_line)
+          A.truthy(warned)
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), true)
+          A.truthy(repo:read(repo.files.tracked):match('^<<<<<<<') ~= nil)
+        end)
+      end,
+    },
+    {
+      name = 'merge conflict navigation keymaps move through unresolved conflicts in the result pane',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
 
-          vim.api.nvim_win_set_cursor(diffview.new_win, { #lines, 0 })
-          N.press(']x')
-          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
-          N.press(']x')
-          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
+          ui.open_file(filetree.files.conflicts[1])
 
-          vim.api.nvim_win_set_cursor(diffview.new_win, { #lines, 0 })
+          local theirs_win = workspace.get_win(diffview.workspace, 'merge_theirs')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), {
+            'intro',
+            'first base',
+            'gap one',
+            'gap two',
+            'gap three',
+            'second base',
+            'outro',
+          })
+          A.equal(vim.api.nvim_get_current_win(), result_win)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 2)
+
+          vim.api.nvim_set_current_win(theirs_win)
+          N.press(']x')
+          A.equal(vim.api.nvim_get_current_win(), result_win)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 6)
+
+          N.press(']x')
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 2)
+
           N.press('[x')
-          A.equal(vim.api.nvim_win_get_cursor(diffview.new_win)[1], marker_line)
+          A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 6)
         end)
       end,
     },

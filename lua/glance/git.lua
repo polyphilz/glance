@@ -92,6 +92,31 @@ local function git_dir_at_root(root)
   return M._git_dir
 end
 
+local function read_trimmed_file(path)
+  if type(path) ~= 'string' or path == '' then
+    return nil
+  end
+
+  local stat = vim.uv.fs_stat(path)
+  if not stat or stat.type ~= 'file' then
+    return nil
+  end
+
+  local file = io.open(path, 'r')
+  if not file then
+    return nil
+  end
+
+  local content = file:read('*a')
+  file:close()
+  content = vim.trim(content or '')
+  if content == '' then
+    return nil
+  end
+
+  return content
+end
+
 local function format_timespec(spec)
   if type(spec) == 'table' then
     return tostring(spec.sec or 0) .. ':' .. tostring(spec.nsec or 0)
@@ -619,6 +644,151 @@ function M.git_dir()
   return git_dir_at_root(M.repo_root())
 end
 
+function M.get_unmerged_stage_entries(filepath)
+  if type(filepath) ~= 'string' or filepath == '' then
+    return {}
+  end
+
+  local ok, output = M.run_git_capture({ 'ls-files', '-u', '--', filepath })
+  if not ok then
+    return {}
+  end
+
+  local entries = {}
+  for line in output:gmatch('[^\n]+') do
+    local mode, oid, stage, path = line:match('^(%d+)%s+([0-9a-f]+)%s+(%d)%s+(.+)$')
+    if mode and oid and stage and path then
+      entries[tonumber(stage)] = {
+        mode = mode,
+        oid = oid,
+        stage = tonumber(stage),
+        path = path,
+      }
+    end
+  end
+
+  return entries
+end
+
+local function ref_name_label(ref)
+  local ok, output = M.run_git_capture({ 'name-rev', '--name-only', '--always', ref }, {
+    allowed_codes = { 0, 128 },
+  })
+  if not ok then
+    return nil
+  end
+
+  local label = vim.trim(output)
+  if label == '' or label == 'undefined' or label == ref then
+    return nil
+  end
+
+  if label:match('^refs/heads/') then
+    return label:gsub('^refs/heads/', '')
+  end
+
+  return label
+end
+
+local function short_ref_oid(ref)
+  local ok, output = M.run_git_capture({ 'rev-parse', '--short', ref }, {
+    allowed_codes = { 0, 128 },
+  })
+  if not ok then
+    return nil
+  end
+
+  local oid = vim.trim(output)
+  if oid == '' then
+    return nil
+  end
+
+  return oid
+end
+
+local function ref_display(ref)
+  if type(ref) ~= 'string' or ref == '' then
+    return nil
+  end
+
+  local label = ref_name_label(ref)
+  if label and label ~= ref then
+    return ref .. ' (' .. label .. ')'
+  end
+
+  local oid = short_ref_oid(ref)
+  if oid then
+    return ref .. ' (' .. oid .. ')'
+  end
+
+  return ref
+end
+
+function M.get_operation_context()
+  local git_dir = M.git_dir()
+  if not git_dir then
+    return {
+      kind = nil,
+      prefix = nil,
+      ours_ref = 'HEAD',
+      ours_display = ref_display('HEAD') or 'HEAD',
+      theirs_ref = nil,
+      theirs_display = nil,
+    }
+  end
+
+  local context = {
+    kind = nil,
+    prefix = nil,
+    ours_ref = 'HEAD',
+    ours_display = ref_display('HEAD') or 'HEAD',
+    theirs_ref = nil,
+    theirs_display = nil,
+  }
+
+  if vim.uv.fs_stat(git_dir .. '/rebase-merge') or vim.uv.fs_stat(git_dir .. '/rebase-apply') then
+    context.kind = 'rebase'
+    context.prefix = 'Rebasing'
+    if vim.uv.fs_stat(git_dir .. '/REBASE_HEAD') then
+      context.theirs_ref = 'REBASE_HEAD'
+      context.theirs_display = ref_display('REBASE_HEAD') or 'REBASE_HEAD'
+    else
+      local onto = read_trimmed_file(git_dir .. '/rebase-merge/onto')
+        or read_trimmed_file(git_dir .. '/rebase-apply/onto')
+      if onto then
+        context.theirs_ref = onto
+        context.theirs_display = short_ref_oid(onto) or onto
+      end
+    end
+    return context
+  end
+
+  if vim.uv.fs_stat(git_dir .. '/MERGE_HEAD') then
+    context.kind = 'merge'
+    context.theirs_ref = 'MERGE_HEAD'
+    context.theirs_display = ref_display('MERGE_HEAD') or 'MERGE_HEAD'
+    return context
+  end
+
+  if vim.uv.fs_stat(git_dir .. '/CHERRY_PICK_HEAD') then
+    context.kind = 'cherry_pick'
+    context.prefix = 'Cherry-picking'
+    context.theirs_ref = 'CHERRY_PICK_HEAD'
+    context.theirs_display = ref_display('CHERRY_PICK_HEAD') or 'CHERRY_PICK_HEAD'
+    return context
+  end
+
+  if vim.uv.fs_stat(git_dir .. '/REVERT_HEAD') then
+    context.kind = 'revert'
+    context.prefix = 'Reverting'
+    context.theirs_ref = 'REVERT_HEAD'
+    context.theirs_display = ref_display('REVERT_HEAD') or 'REVERT_HEAD'
+    return context
+  end
+
+  return context
+end
+
 function M.repo_watch_paths()
   local git_dir = M.git_dir()
   if not git_dir then
@@ -657,30 +827,22 @@ end
 --- Retrieve file content at a specific git ref.
 --- @param filepath string  Path relative to repo root
 --- @param ref string|nil   "HEAD", ":" (index), or nil (working tree / disk)
---- @return string[]        Lines of file content
-function M.get_file_content(filepath, ref)
+--- @return string          Raw file text
+function M.get_file_text(filepath, ref)
   if ref == nil then
     -- Read from working tree (disk)
     local root = M.repo_root()
     if not root then
-      return {}
+      return ''
     end
     local full_path = root .. '/' .. filepath
-    local f = io.open(full_path, 'r')
+    local f = io.open(full_path, 'rb')
     if not f then
-      return {}
+      return ''
     end
     local content = f:read('*a')
     f:close()
-    local lines = {}
-    for line in (content .. '\n'):gmatch('(.-)\n') do
-      table.insert(lines, line)
-    end
-    -- Remove trailing empty line from the split
-    if #lines > 0 and lines[#lines] == '' then
-      table.remove(lines)
-    end
-    return lines
+    return content or ''
   end
 
   -- ref is "HEAD" or ":" (index)
@@ -693,17 +855,33 @@ function M.get_file_content(filepath, ref)
 
   local result = vim.fn.system('git show ' .. vim.fn.shellescape(git_ref) .. ' 2>/dev/null')
   if vim.v.shell_error ~= 0 then
+    return ''
+  end
+
+  return result or ''
+end
+
+local function split_content_lines(text)
+  if type(text) ~= 'string' or text == '' then
     return {}
   end
 
   local lines = {}
-  for line in (result .. '\n'):gmatch('(.-)\n') do
+  for line in (text .. '\n'):gmatch('(.-)\n') do
     table.insert(lines, line)
   end
   if #lines > 0 and lines[#lines] == '' then
     table.remove(lines)
   end
   return lines
+end
+
+--- Retrieve file content at a specific git ref.
+--- @param filepath string  Path relative to repo root
+--- @param ref string|nil   "HEAD", ":" (index), or nil (working tree / disk)
+--- @return string[]        Lines of file content
+function M.get_file_content(filepath, ref)
+  return split_content_lines(M.get_file_text(filepath, ref))
 end
 
 function M.entry_paths(file)

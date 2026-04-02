@@ -211,6 +211,88 @@ function scenarios.repo_conflict(fixture)
   assert(not ok, 'expected merge conflict fixture')
 end
 
+function scenarios.repo_conflict_add_add(fixture)
+  seed_committed_file(fixture, 'anchor.txt', 'anchor\n', 'anchor')
+  fixture.files.tracked = 'tracked.txt'
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, 'feature add\n')
+  fixture:commit_all('Feature add')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.tracked, 'main add\n')
+  fixture:commit_all('Main add')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected add/add conflict fixture')
+end
+
+function scenarios.repo_conflict_multi(fixture)
+  seed_committed_file(fixture, 'tracked.txt', table.concat({
+    'intro',
+    'first base',
+    'gap one',
+    'gap two',
+    'gap three',
+    'second base',
+    'outro',
+    '',
+  }, '\n'))
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, table.concat({
+    'intro',
+    'first feature',
+    'gap one',
+    'gap two',
+    'gap three',
+    'second feature',
+    'outro',
+    '',
+  }, '\n'))
+  fixture:commit_all('Feature multi conflict')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.tracked, table.concat({
+    'intro',
+    'first main',
+    'gap one',
+    'gap two',
+    'gap three',
+    'second main',
+    'outro',
+    '',
+  }, '\n'))
+  fixture:commit_all('Main multi conflict')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected multi-conflict fixture')
+end
+
+function scenarios.repo_conflict_noeol(fixture)
+  seed_committed_file(fixture, 'tracked.txt', 'base')
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, 'feature')
+  fixture:commit_all('Feature change')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.tracked, 'main')
+  fixture:commit_all('Main change')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected merge conflict fixture without trailing newline')
+end
+
 function scenarios.repo_type_change(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
   fixture:remove(fixture.files.tracked)

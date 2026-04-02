@@ -611,37 +611,7 @@ end
 
 --- Open a single editable pane for a conflicted working-tree file.
 function M.open_conflict(file)
-  local root = git.repo_root()
-  if not root then return end
-
-  prepare_default_workspace()
-  open_single_pane()
-
-  local full_path = root .. '/' .. file.path
-  vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
-  M.new_buf = vim.api.nvim_get_current_buf()
-
-  if watch_options().enabled then
-    M.watch_file(full_path)
-  end
-
-  apply_conflict_highlights(M.new_buf)
-  set_window_label(M.new_win, 'Conflict: unresolved markers')
-
-  M.equalize_panes()
-  M.setup_autocmds(file)
-  M.bind_buffer_keymaps()
-
-  local opts = { buffer = M.new_buf, silent = true }
-  vim.keymap.set('n', ']x', jump_to_next_conflict, opts)
-  vim.keymap.set('n', '[x', jump_to_prev_conflict, opts)
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
-    group = M.autocmd_group,
-    buffer = M.new_buf,
-    callback = function()
-      apply_conflict_highlights(M.new_buf)
-    end,
-  })
+  require('glance.merge').open(M, file)
 end
 
 --- Open a single read-only placeholder pane for visible-but-unsupported states.
@@ -826,6 +796,8 @@ function M.setup_autocmds(file)
   })
 
   local editable_buf = M.editable_buf()
+  local merge = package.loaded['glance.merge']
+  local merge_active = merge and merge.is_active and merge.is_active()
 
   -- When the workspace's editable buffer is saved, refresh the diff.
   if editable_buf and vim.api.nvim_buf_get_option(editable_buf, 'buftype') == '' then
@@ -840,16 +812,18 @@ function M.setup_autocmds(file)
         end,
       })
 
-      vim.api.nvim_create_autocmd('BufWritePost', {
-        group = M.autocmd_group,
-        buffer = editable_buf,
-        callback = function()
-          vim.schedule(function()
-            M.refresh(file)
-            filetree.note_repo_activity()
-          end)
-        end,
-      })
+      if not merge_active then
+        vim.api.nvim_create_autocmd('BufWritePost', {
+          group = M.autocmd_group,
+          buffer = editable_buf,
+          callback = function()
+            vim.schedule(function()
+              M.refresh(file)
+              filetree.note_repo_activity()
+            end)
+          end,
+        })
+      end
   end
 end
 
@@ -880,6 +854,14 @@ function M.content_wins()
 end
 
 function M.hoverable_separator_wins()
+  local merge = package.loaded['glance.merge']
+  if merge and merge.is_active and merge.is_active() then
+    local wins = merge.hoverable_separator_wins(M)
+    if wins then
+      return wins
+    end
+  end
+
   sync_filetree_pane()
 
   local wins = {}
@@ -1026,6 +1008,11 @@ function M.close(force)
 
     M.reset_workspace()
 
+    local merge = package.loaded['glance.merge']
+    if merge and merge.reset then
+      merge.reset()
+    end
+
     local ui = require('glance.ui')
     ui.close_diff()
   end, debug.traceback)
@@ -1041,6 +1028,12 @@ end
 --- Refresh the diff after a save (re-read old content, update diff).
 function M.refresh(file)
   if not file then
+    return
+  end
+
+  local merge = package.loaded['glance.merge']
+  if merge and merge.is_active and merge.is_active() then
+    merge.refresh(M, file)
     return
   end
 
@@ -1108,6 +1101,11 @@ end
 
 --- Explicitly size panes: file tree gets its fixed width, diff panes split the rest.
 function M.equalize_panes()
+  local merge = package.loaded['glance.merge']
+  if merge and merge.is_active and merge.is_active() and merge.equalize_panes(M) then
+    return
+  end
+
   sync_filetree_pane()
   local tree_visible = filetree.win and vim.api.nvim_win_is_valid(filetree.win)
   local tree_width = 0
