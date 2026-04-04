@@ -90,6 +90,60 @@ return {
       end,
     },
     {
+      name = 'hover highlighting marks merge pane separators, including the horizontal split above result',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local filetree = require('glance.filetree')
+          local ui = require('glance.ui')
+          local diffview = require('glance.diffview')
+          local layout = require('glance.merge.layout')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local theirs_win = workspace.get_win(diffview.workspace, layout.THEIRS_ROLE)
+          local ours_win = workspace.get_win(diffview.workspace, layout.OURS_ROLE)
+          local result_win = workspace.get_win(diffview.workspace, layout.RESULT_ROLE)
+          local result_pos = vim.fn.win_screenpos(result_win)
+
+          ui.update_separator_hover({
+            winid = result_win,
+            line = 0,
+            column = 0,
+            screenrow = result_pos[1] - 1,
+            screencol = result_pos[2] + 2,
+          })
+
+          local theirs_hl = vim.api.nvim_get_option_value('winhighlight', { win = theirs_win })
+          local ours_hl = vim.api.nvim_get_option_value('winhighlight', { win = ours_win })
+          A.contains(theirs_hl, 'StatusLine:GlanceSeparatorHover')
+          A.contains(theirs_hl, 'StatusLineNC:GlanceSeparatorHover')
+          A.falsy(ours_hl:find('StatusLine:GlanceSeparatorHover', 1, true))
+
+          ui.update_separator_hover({
+            winid = theirs_win,
+            line = 0,
+            column = 0,
+            screenrow = result_pos[1] - 1,
+            screencol = result_pos[2] + vim.api.nvim_win_get_width(result_win) - 3,
+          })
+
+          theirs_hl = vim.api.nvim_get_option_value('winhighlight', { win = theirs_win })
+          ours_hl = vim.api.nvim_get_option_value('winhighlight', { win = ours_win })
+          A.falsy(theirs_hl:find('StatusLine:GlanceSeparatorHover', 1, true))
+          A.contains(ours_hl, 'StatusLine:GlanceSeparatorHover')
+          A.contains(ours_hl, 'StatusLineNC:GlanceSeparatorHover')
+
+          ui.clear_separator_hover()
+          theirs_hl = vim.api.nvim_get_option_value('winhighlight', { win = theirs_win })
+          ours_hl = vim.api.nvim_get_option_value('winhighlight', { win = ours_win })
+          A.falsy(theirs_hl:find('StatusLine:GlanceSeparatorHover', 1, true))
+          A.falsy(ours_hl:find('StatusLine:GlanceSeparatorHover', 1, true))
+        end)
+      end,
+    },
+    {
       name = 'opening a file closes welcome and routes to the correct diff opener',
       run = function()
         N.with_repo('repo_modified', function()

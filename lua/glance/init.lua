@@ -115,6 +115,33 @@ function M.start()
   end
 end
 
+local function hex_to_rgb(hex)
+  if type(hex) ~= 'string' then
+    return nil
+  end
+
+  local value = hex:gsub('#', '')
+  if #value ~= 6 then
+    return nil
+  end
+
+  return tonumber(value:sub(1, 2), 16), tonumber(value:sub(3, 4), 16), tonumber(value:sub(5, 6), 16)
+end
+
+local function blend_hex(base_hex, tint_hex, alpha)
+  local base_r, base_g, base_b = hex_to_rgb(base_hex)
+  local tint_r, tint_g, tint_b = hex_to_rgb(tint_hex)
+  if not base_r or not tint_r then
+    return base_hex
+  end
+
+  local function mix(base, tint)
+    return math.floor((base * (1 - alpha)) + (tint * alpha) + 0.5)
+  end
+
+  return string.format('#%02X%02X%02X', mix(base_r, tint_r), mix(base_g, tint_g), mix(base_b, tint_b))
+end
+
 function M.setup_highlights()
   local palette = require('glance.config').options.theme.palette
   local bg = palette.bg
@@ -128,6 +155,9 @@ function M.setup_highlights()
   local param = palette.accent
   local selection = palette.selection
   local line_hl = palette.line_highlight
+  local merge_unresolved_bg = blend_hex(bg, palette.logo, 0.16)
+  local merge_handled_bg = blend_hex(bg, palette.added, 0.16)
+  local merge_manual_bg = blend_hex(bg, type_color, 0.14)
 
   -- Editor
   vim.api.nvim_set_hl(0, 'Normal', { bg = bg, fg = fg })
@@ -227,6 +257,13 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceAccentText', { fg = param, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceLegendText', { fg = comment, bg = bg })
   vim.api.nvim_set_hl(0, 'GlanceLegendHint', { fg = palette.accent, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerUnresolved', { fg = palette.logo, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerHandled', { fg = palette.added, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerManual', { fg = type_color, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictStateUnresolved', { bg = merge_unresolved_bg })
+  vim.api.nvim_set_hl(0, 'GlanceConflictStateHandled', { bg = merge_handled_bg })
+  vim.api.nvim_set_hl(0, 'GlanceConflictStateManual', { bg = merge_manual_bg })
+  vim.api.nvim_set_hl(0, 'GlanceConflictActiveNumber', { fg = palette.split_hover, bg = bg, bold = true })
 
   -- Minimap highlights
   require('glance.minimap').setup_highlights()

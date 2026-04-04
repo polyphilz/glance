@@ -14,6 +14,7 @@ local ALLOWED_TOP_LEVEL = {
   windows = true,
   filetree = true,
   log = true,
+  merge = true,
   keymaps = true,
   pane_navigation = true,
   hunk_navigation = true,
@@ -83,6 +84,32 @@ local ALLOWED_FILETREE = {
 
 local ALLOWED_LOG = {
   max_commits = true,
+}
+
+local ALLOWED_MERGE = {
+  keymaps = true,
+}
+
+local ALLOWED_MERGE_KEYMAPS = {
+  accept_ours = true,
+  accept_theirs = true,
+  accept_both_ours_then_theirs = true,
+  accept_both_theirs_then_ours = true,
+  ignore_ours = true,
+  ignore_theirs = true,
+  reset_conflict = true,
+  mark_resolved = true,
+}
+
+local MERGE_KEYMAP_ORDER = {
+  'accept_ours',
+  'accept_theirs',
+  'accept_both_ours_then_theirs',
+  'accept_both_theirs_then_ours',
+  'ignore_ours',
+  'ignore_theirs',
+  'reset_conflict',
+  'mark_resolved',
 }
 
 local ALLOWED_FILETREE_WINDOW = {
@@ -221,6 +248,18 @@ local BASE_DEFAULTS = {
   },
   log = {
     max_commits = 200,
+  },
+  merge = {
+    keymaps = {
+      accept_ours = '<leader>o',
+      accept_theirs = '<leader>t',
+      accept_both_ours_then_theirs = '<leader>b',
+      accept_both_theirs_then_ours = '<leader>B',
+      ignore_ours = '<leader>O',
+      ignore_theirs = '<leader>T',
+      reset_conflict = '<leader>r',
+      mark_resolved = '<leader>m',
+    },
   },
   keymaps = {
     open_file = '<CR>',
@@ -403,6 +442,44 @@ local function validate_log(options)
   validate_integer(log.max_commits, 'log.max_commits', 1)
 end
 
+local function validate_merge(options)
+  local merge = options.merge
+  local keymaps = merge.keymaps or {}
+  local seen = {}
+
+  validate_known_keys(merge, ALLOWED_MERGE, 'merge')
+  validate_known_keys(keymaps, ALLOWED_MERGE_KEYMAPS, 'merge.keymaps')
+
+  for _, key in ipairs(MERGE_KEYMAP_ORDER) do
+    local value = keymaps[key]
+    validate_string(value, 'merge.keymaps.' .. key)
+    if seen[value] then
+      fail('merge.keymaps.' .. key .. ' conflicts with merge.keymaps.' .. seen[value])
+    end
+    seen[value] = key
+  end
+
+  for name, lhs in pairs(keymaps) do
+    for key, value in pairs(options.keymaps or {}) do
+      if value == lhs then
+        fail('merge.keymaps.' .. name .. ' conflicts with keymaps.' .. key)
+      end
+    end
+
+    for key, value in pairs(options.pane_navigation or {}) do
+      if value == lhs then
+        fail('merge.keymaps.' .. name .. ' conflicts with pane_navigation.' .. key)
+      end
+    end
+
+    for key, value in pairs(options.hunk_navigation or {}) do
+      if value == lhs then
+        fail('merge.keymaps.' .. name .. ' conflicts with hunk_navigation.' .. key)
+      end
+    end
+  end
+end
+
 local function validate_keymaps(options)
   local keymaps = options.keymaps
   local seen = {}
@@ -527,6 +604,7 @@ local function validate_options(options)
   validate_windows(options)
   validate_filetree(options)
   validate_log(options)
+  validate_merge(options)
   validate_keymaps(options)
   validate_pane_navigation(options)
   validate_hunk_navigation(options)

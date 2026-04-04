@@ -4,6 +4,13 @@ local pane_navigation = require('glance.pane_navigation')
 
 local M = {}
 local SEPARATOR_HL = 'GlanceSeparatorHover'
+local STATUSLINE_HOVER_GROUPS = {
+  StatusLine = SEPARATOR_HL,
+  StatusLineNC = SEPARATOR_HL,
+}
+local WIN_SEPARATOR_HOVER_GROUPS = {
+  WinSeparator = SEPARATOR_HL,
+}
 local WELCOME_FRAME_MS = 150
 
 local ns = vim.api.nvim_create_namespace('glance_welcome')
@@ -29,6 +36,9 @@ M.animation_tick = 0
 M.starfield = nil
 M.starfield_key = nil
 M.separator_hover_win = nil
+M.separator_hover_targets = {}
+M.separator_hover_key_ns = nil
+M.separator_hover_pending = false
 
 local function hex_to_rgb(color)
   return tonumber(color:sub(2, 3), 16), tonumber(color:sub(4, 5), 16), tonumber(color:sub(6, 7), 16)
@@ -109,11 +119,12 @@ local function encode_winhighlight(items)
   return table.concat(encoded, ',')
 end
 
-local function apply_separator_hover(win, active)
+local function apply_separator_hover(win, active, groups)
   if not win or not vim.api.nvim_win_is_valid(win) then
     return
   end
 
+  groups = groups or WIN_SEPARATOR_HOVER_GROUPS
   local current = vim.api.nvim_get_option_value('winhighlight', { win = win })
   local parsed = {}
 
@@ -124,64 +135,187 @@ local function apply_separator_hover(win, active)
     end
   end
 
-  if active then
-    parsed.WinSeparator = SEPARATOR_HL
-  elseif parsed.WinSeparator == SEPARATOR_HL then
-    parsed.WinSeparator = nil
+  for group, highlight in pairs(groups) do
+    if active then
+      parsed[group] = highlight
+    elseif parsed[group] == highlight then
+      parsed[group] = nil
+    end
   end
 
   vim.api.nvim_win_set_option(win, 'winhighlight', encode_winhighlight(parsed))
 end
 
 function M.clear_separator_hover()
-  if M.separator_hover_win and vim.api.nvim_win_is_valid(M.separator_hover_win) then
-    apply_separator_hover(M.separator_hover_win, false)
+  for _, target in ipairs(M.separator_hover_targets or {}) do
+    if target.win and vim.api.nvim_win_is_valid(target.win) then
+      apply_separator_hover(target.win, false, target.groups)
+    end
   end
+
   M.separator_hover_win = nil
+  M.separator_hover_targets = {}
 end
 
-local function hovered_separator_win(mouse)
-  if type(mouse) ~= 'table' or mouse.winid == 0 or mouse.line ~= 0 or mouse.column ~= 0 then
-    return nil
+local function all_glance_windows()
+  local diffview = require('glance.diffview')
+  local wins = {}
+
+  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
+    wins[#wins + 1] = filetree.win
   end
 
+  for _, win in ipairs(diffview.content_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      wins[#wins + 1] = win
+    end
+  end
+
+  return wins
+end
+
+local function ranges_overlap(start_a, finish_a, start_b, finish_b)
+  return start_a <= finish_b and start_b <= finish_a
+end
+
+local function vertical_separator_targets(mouse)
   if not hoverable_separator_windows()[mouse.winid] then
-    return nil
+    return {}
   end
 
   local pos = vim.fn.win_screenpos(mouse.winid)
   local top = pos[1]
   local left = pos[2]
   if top == nil or left == nil or top <= 0 or left <= 0 then
-    return nil
+    return {}
   end
 
   local right_separator = left + vim.api.nvim_win_get_width(mouse.winid)
   if mouse.screencol ~= right_separator then
-    return nil
+    return {}
   end
 
-  return mouse.winid
+  return {
+    { win = mouse.winid, groups = WIN_SEPARATOR_HOVER_GROUPS },
+  }
+end
+
+local function horizontal_separator_targets(mouse)
+  local targets = {}
+  local wins = all_glance_windows()
+
+  for _, win in ipairs(wins) do
+    local pos = vim.fn.win_screenpos(win)
+    local top = pos[1]
+    local left = pos[2]
+
+    if top ~= nil and left ~= nil and top > 0 and left > 0 then
+      local width = vim.api.nvim_win_get_width(win)
+      local height = vim.api.nvim_win_get_height(win)
+      local separator_row = top + height
+      local start_col = left
+      local end_col = left + width - 1
+
+      if mouse.screenrow == separator_row and mouse.screencol >= start_col and mouse.screencol <= end_col then
+        for _, other in ipairs(wins) do
+          if other ~= win then
+            local other_pos = vim.fn.win_screenpos(other)
+            local other_top = other_pos[1]
+            local other_left = other_pos[2]
+
+            if other_top == separator_row + 1 and other_left ~= nil and other_left > 0 then
+              local other_width = vim.api.nvim_win_get_width(other)
+              local other_start = other_left
+              local other_end = other_left + other_width - 1
+
+              if ranges_overlap(start_col, end_col, other_start, other_end) then
+                targets[#targets + 1] = {
+                  win = win,
+                  groups = STATUSLINE_HOVER_GROUPS,
+                }
+                break
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return targets
+end
+
+local function separator_targets_key(targets)
+  local keys = {}
+
+  for _, target in ipairs(targets) do
+    local groups = {}
+    for group, highlight in pairs(target.groups or {}) do
+      groups[#groups + 1] = group .. ':' .. highlight
+    end
+    table.sort(groups)
+    keys[#keys + 1] = string.format('%d|%s', target.win, table.concat(groups, ','))
+  end
+
+  table.sort(keys)
+  return table.concat(keys, ';')
+end
+
+local function hovered_separator_targets(mouse)
+  if type(mouse) ~= 'table' or mouse.winid == 0 or mouse.line ~= 0 or mouse.column ~= 0 then
+    return {}
+  end
+
+  local vertical = vertical_separator_targets(mouse)
+  if #vertical > 0 then
+    return vertical
+  end
+
+  return horizontal_separator_targets(mouse)
 end
 
 function M.update_separator_hover(mouse)
-  local win = hovered_separator_win(mouse or vim.fn.getmousepos())
-  if win == M.separator_hover_win then
+  local targets = hovered_separator_targets(mouse or vim.fn.getmousepos())
+  if separator_targets_key(targets) == separator_targets_key(M.separator_hover_targets or {}) then
     return
   end
 
   M.clear_separator_hover()
-  if win then
-    apply_separator_hover(win, true)
-    M.separator_hover_win = win
+  for _, target in ipairs(targets) do
+    apply_separator_hover(target.win, true, target.groups)
+  end
+
+  M.separator_hover_targets = targets
+  if #targets == 1 and targets[1].groups == WIN_SEPARATOR_HOVER_GROUPS then
+    M.separator_hover_win = targets[1].win
+  else
+    M.separator_hover_win = nil
   end
 end
 
 function M.setup_separator_hover()
   vim.opt.mousemoveevent = true
-  vim.keymap.set('n', '<MouseMove>', function()
-    M.update_separator_hover()
-  end, { silent = true })
+
+  if M.separator_hover_key_ns then
+    return
+  end
+
+  local mousemove_key = vim.keycode('<MouseMove>')
+  M.separator_hover_key_ns = vim.on_key(function(key, typed)
+    if key ~= mousemove_key and typed ~= mousemove_key then
+      return
+    end
+
+    if M.separator_hover_pending then
+      return
+    end
+
+    M.separator_hover_pending = true
+    vim.schedule(function()
+      M.separator_hover_pending = false
+      M.update_separator_hover()
+    end)
+  end)
 end
 
 local function fract(value)
