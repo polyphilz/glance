@@ -165,7 +165,6 @@ return {
           local previous_model = assert(merge_model.build(file))
 
           assert(merge_model.apply_action(previous_model, 1, 'accept_ours'))
-          assert(merge_model.apply_action(previous_model, 1, 'ignore_theirs'))
 
           local prepared = assert(merge_model.prepare_write(file, {
             'intro updated',
@@ -226,7 +225,6 @@ return {
           local previous_model = assert(merge_model.build(file))
 
           assert(merge_model.apply_action(previous_model, 1, 'accept_ours'))
-          assert(merge_model.apply_action(previous_model, 1, 'ignore_theirs'))
 
           local prepared = assert(merge_model.prepare_write(file, { 'main' }, {
             current_ends_with_newline = false,
@@ -265,6 +263,41 @@ return {
       end,
     },
     {
+      name = 'legacy partial marker state can be completed by accepting the same side',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local merge_model = require('glance.merge.model')
+          local file = git.get_changed_files().conflicts[1]
+
+          repo:write(repo.files.tracked, table.concat({
+            '<<<<<<< Ours',
+            'main',
+            '||||||| Base',
+            'main',
+            '=======',
+            'feature',
+            '>>>>>>> Theirs',
+            '',
+          }, '\n'))
+
+          local legacy = assert(merge_model.build(file))
+          A.equal(legacy.conflicts[1].state, 'ours')
+          A.truthy(legacy.conflicts[1].ours_handled)
+          A.falsy(legacy.conflicts[1].theirs_handled)
+          A.falsy(legacy.conflicts[1].handled)
+
+          assert(merge_model.apply_action(legacy, 1, 'accept_ours'))
+
+          local prepared = assert(merge_model.prepare_write(file, { 'main' }, {
+            previous_model = legacy,
+          }))
+
+          A.same(prepared.persisted_lines, { 'main' })
+        end)
+      end,
+    },
+    {
       name = 'rebuild preserves explicit in-session states when the clean result text is unchanged',
       run = function()
         N.with_repo('repo_conflict', function()
@@ -272,27 +305,26 @@ return {
           local merge_model = require('glance.merge.model')
           local file = git.get_changed_files().conflicts[1]
 
-          local pending = assert(merge_model.build(file))
-          assert(merge_model.apply_action(pending, 1, 'accept_ours'))
+          local handled_ours = assert(merge_model.build(file))
+          assert(merge_model.apply_action(handled_ours, 1, 'accept_ours'))
 
-          local rebuilt_pending = assert(merge_model.build(file, {
+          local rebuilt_ours = assert(merge_model.build(file, {
             current_lines = { 'main' },
             current_ends_with_newline = true,
-            previous_model = pending,
+            previous_model = handled_ours,
             manual_clean_state = 'manual_unresolved',
           }))
 
-          A.same(snapshot(rebuilt_pending.conflicts[1]), {
+          A.same(snapshot(rebuilt_ours.conflicts[1]), {
             state = 'ours',
             ours_handled = true,
-            theirs_handled = false,
-            handled = false,
+            theirs_handled = true,
+            handled = true,
             current_result_lines = { 'main' },
           })
 
           local handled_base = assert(merge_model.build(file))
-          assert(merge_model.apply_action(handled_base, 1, 'ignore_ours'))
-          assert(merge_model.apply_action(handled_base, 1, 'ignore_theirs'))
+          assert(merge_model.apply_action(handled_base, 1, 'keep_base'))
 
           local rebuilt_base = assert(merge_model.build(file, {
             current_lines = { 'base' },
@@ -312,7 +344,7 @@ return {
       end,
     },
     {
-      name = 'text-conflict action transitions use replacement semantics instead of additive semantics',
+      name = 'text-conflict action transitions resolve with replacement semantics',
       run = function()
         N.with_repo('repo_conflict', function()
           local git = require('glance.git')
@@ -321,143 +353,35 @@ return {
           local cases = {
             {
               actions = { 'accept_ours' },
-              expected = {
-                state = 'ours',
-                ours_handled = true,
-                theirs_handled = false,
-                handled = false,
-                current_result_lines = { 'main' },
-              },
+              expected = expected_snapshot('ours', true, true, { 'main' }),
             },
             {
               actions = { 'accept_theirs' },
-              expected = {
-                state = 'theirs',
-                ours_handled = false,
-                theirs_handled = true,
-                handled = false,
-                current_result_lines = { 'feature' },
-              },
+              expected = expected_snapshot('theirs', true, true, { 'feature' }),
             },
             {
-              actions = { 'ignore_ours' },
-              expected = {
-                state = 'base_only',
-                ours_handled = true,
-                theirs_handled = false,
-                handled = false,
-                current_result_lines = { 'base' },
-              },
-            },
-            {
-              actions = { 'ignore_theirs' },
-              expected = {
-                state = 'base_only',
-                ours_handled = false,
-                theirs_handled = true,
-                handled = false,
-                current_result_lines = { 'base' },
-              },
+              actions = { 'keep_base' },
+              expected = expected_snapshot('base_only', true, true, { 'base' }),
             },
             {
               actions = { 'accept_theirs', 'accept_ours' },
-              expected = {
-                state = 'ours',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'main' },
-              },
+              expected = expected_snapshot('ours', true, true, { 'main' }),
             },
             {
               actions = { 'accept_ours', 'accept_theirs' },
-              expected = {
-                state = 'theirs',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'feature' },
-              },
-            },
-            {
-              actions = { 'ignore_theirs', 'accept_ours' },
-              expected = {
-                state = 'ours',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'main' },
-              },
-            },
-            {
-              actions = { 'ignore_ours', 'accept_theirs' },
-              expected = {
-                state = 'theirs',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'feature' },
-              },
-            },
-            {
-              actions = { 'accept_ours', 'ignore_theirs' },
-              expected = {
-                state = 'ours',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'main' },
-              },
-            },
-            {
-              actions = { 'accept_theirs', 'ignore_ours' },
-              expected = {
-                state = 'theirs',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'feature' },
-              },
-            },
-            {
-              actions = { 'ignore_theirs', 'ignore_ours' },
-              expected = {
-                state = 'base_only',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'base' },
-              },
+              expected = expected_snapshot('theirs', true, true, { 'feature' }),
             },
             {
               actions = { 'accept_both_ours_then_theirs', 'accept_ours' },
-              expected = {
-                state = 'ours',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'main' },
-              },
+              expected = expected_snapshot('ours', true, true, { 'main' }),
             },
             {
-              actions = { 'accept_both_theirs_then_ours', 'accept_theirs' },
-              expected = {
-                state = 'theirs',
-                ours_handled = true,
-                theirs_handled = true,
-                handled = true,
-                current_result_lines = { 'feature' },
-              },
+              actions = { 'keep_base', 'accept_theirs' },
+              expected = expected_snapshot('theirs', true, true, { 'feature' }),
             },
             {
               actions = { 'accept_ours', 'reset_conflict' },
-              expected = {
-                state = 'unresolved',
-                ours_handled = false,
-                theirs_handled = false,
-                handled = false,
-                current_result_lines = { 'base' },
-              },
+              expected = expected_snapshot('unresolved', false, false, { 'base' }),
             },
           }
 
@@ -488,14 +412,9 @@ return {
             manual = { 'custom merge draft' },
           }
           local invalid_mark_resolved = 'mark resolved is only available for manual unresolved conflicts'
-          local invalid_manual_ignore = 'ignore actions are not available for manual merge states'
 
           local expected = {
             unresolved = expected_snapshot('unresolved', false, false, lines.base),
-            pending_ours = expected_snapshot('ours', true, false, lines.ours),
-            pending_theirs = expected_snapshot('theirs', false, true, lines.theirs),
-            pending_base_from_ignore_ours = expected_snapshot('base_only', true, false, lines.base),
-            pending_base_from_ignore_theirs = expected_snapshot('base_only', false, true, lines.base),
             handled_ours = expected_snapshot('ours', true, true, lines.ours),
             handled_theirs = expected_snapshot('theirs', true, true, lines.theirs),
             handled_both_ours_then_theirs =
@@ -509,6 +428,12 @@ return {
 
           local function build_base_model()
             return assert(merge_model.build(file))
+          end
+
+          local function build_action_variant(action)
+            local model = build_base_model()
+            assert(merge_model.apply_action(model, 1, action))
+            return model
           end
 
           local function build_manual_variant(mark_resolved)
@@ -526,217 +451,31 @@ return {
           end
 
           local variants = {
-            {
-              name = 'unresolved',
-              model = build_base_model(),
-            },
-            {
-              name = 'pending_ours',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_ours'))
-                return model
-              end)(),
-            },
-            {
-              name = 'pending_theirs',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_theirs'))
-                return model
-              end)(),
-            },
-            {
-              name = 'pending_base_from_ignore_ours',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'ignore_ours'))
-                return model
-              end)(),
-            },
-            {
-              name = 'pending_base_from_ignore_theirs',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'ignore_theirs'))
-                return model
-              end)(),
-            },
-            {
-              name = 'handled_ours',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_theirs'))
-                assert(merge_model.apply_action(model, 1, 'accept_ours'))
-                return model
-              end)(),
-            },
-            {
-              name = 'handled_theirs',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_ours'))
-                assert(merge_model.apply_action(model, 1, 'accept_theirs'))
-                return model
-              end)(),
-            },
-            {
-              name = 'handled_both_ours_then_theirs',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_both_ours_then_theirs'))
-                return model
-              end)(),
-            },
-            {
-              name = 'handled_both_theirs_then_ours',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'accept_both_theirs_then_ours'))
-                return model
-              end)(),
-            },
-            {
-              name = 'handled_base',
-              model = (function()
-                local model = build_base_model()
-                assert(merge_model.apply_action(model, 1, 'ignore_ours'))
-                assert(merge_model.apply_action(model, 1, 'ignore_theirs'))
-                return model
-              end)(),
-            },
-            {
-              name = 'manual_unresolved',
-              model = build_manual_variant(false),
-            },
-            {
-              name = 'manual_resolved',
-              model = build_manual_variant(true),
-            },
+            { name = 'unresolved', model = build_base_model() },
+            { name = 'handled_ours', model = build_action_variant('accept_ours') },
+            { name = 'handled_theirs', model = build_action_variant('accept_theirs') },
+            { name = 'handled_both_ours_then_theirs', model = build_action_variant('accept_both_ours_then_theirs') },
+            { name = 'handled_both_theirs_then_ours', model = build_action_variant('accept_both_theirs_then_ours') },
+            { name = 'handled_base', model = build_action_variant('keep_base') },
+            { name = 'manual_unresolved', model = build_manual_variant(false) },
+            { name = 'manual_resolved', model = build_manual_variant(true) },
           }
 
-          local transitions = {
-            unresolved = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.pending_ours,
-              accept_theirs = expected.pending_theirs,
-              ignore_ours = expected.pending_base_from_ignore_ours,
-              ignore_theirs = expected.pending_base_from_ignore_theirs,
-            },
-            pending_ours = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.pending_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.pending_ours,
-              ignore_theirs = expected.handled_ours,
-            },
-            pending_theirs = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.pending_theirs,
-              ignore_ours = expected.handled_theirs,
-              ignore_theirs = expected.pending_theirs,
-            },
-            pending_base_from_ignore_ours = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.pending_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.pending_base_from_ignore_ours,
-              ignore_theirs = expected.handled_base,
-            },
-            pending_base_from_ignore_theirs = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.pending_theirs,
-              ignore_ours = expected.handled_base,
-              ignore_theirs = expected.pending_base_from_ignore_theirs,
-            },
-            handled_ours = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.handled_ours,
-              ignore_theirs = expected.handled_ours,
-            },
-            handled_theirs = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.handled_theirs,
-              ignore_theirs = expected.handled_theirs,
-            },
-            handled_both_ours_then_theirs = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.handled_both_ours_then_theirs,
-              ignore_theirs = expected.handled_both_ours_then_theirs,
-            },
-            handled_both_theirs_then_ours = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.handled_both_theirs_then_ours,
-              ignore_theirs = expected.handled_both_theirs_then_ours,
-            },
-            handled_base = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = expected.handled_base,
-              ignore_theirs = expected.handled_base,
-            },
-            manual_unresolved = {
-              mark_resolved = expected.manual_resolved,
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.pending_ours,
-              accept_theirs = expected.pending_theirs,
-              ignore_ours = { err = invalid_manual_ignore },
-              ignore_theirs = { err = invalid_manual_ignore },
-            },
-            manual_resolved = {
-              mark_resolved = { err = invalid_mark_resolved },
-              reset_conflict = expected.unresolved,
-              accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
-              accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
-              accept_ours = expected.handled_ours,
-              accept_theirs = expected.handled_theirs,
-              ignore_ours = { err = invalid_manual_ignore },
-              ignore_theirs = { err = invalid_manual_ignore },
-            },
+          local replace_transitions = {
+            reset_conflict = expected.unresolved,
+            accept_both_ours_then_theirs = expected.handled_both_ours_then_theirs,
+            accept_both_theirs_then_ours = expected.handled_both_theirs_then_ours,
+            accept_ours = expected.handled_ours,
+            accept_theirs = expected.handled_theirs,
+            keep_base = expected.handled_base,
           }
+
+          local transitions = {}
+          for _, variant in ipairs(variants) do
+            transitions[variant.name] = vim.deepcopy(replace_transitions)
+            transitions[variant.name].mark_resolved = { err = invalid_mark_resolved }
+          end
+          transitions.manual_unresolved.mark_resolved = expected.manual_resolved
 
           local actions = {
             'mark_resolved',
@@ -745,8 +484,7 @@ return {
             'accept_both_theirs_then_ours',
             'accept_ours',
             'accept_theirs',
-            'ignore_ours',
-            'ignore_theirs',
+            'keep_base',
           }
           local exercised = 0
 
@@ -773,7 +511,7 @@ return {
       end,
     },
     {
-      name = 'accept ours persists and rehydrates as a partial unresolved state',
+      name = 'accept ours persists clean text and reopens as manual_resolved',
       run = function()
         N.with_repo('repo_conflict', function(repo)
           local git = require('glance.git')
@@ -784,31 +522,23 @@ return {
           local updated = assert(merge_model.apply_action(previous_model, 1, 'accept_ours'))
           A.equal(updated.state, 'ours')
           A.truthy(updated.ours_handled)
-          A.falsy(updated.theirs_handled)
-          A.falsy(updated.handled)
+          A.truthy(updated.theirs_handled)
+          A.truthy(updated.handled)
 
           local prepared = assert(merge_model.prepare_write(file, { 'main' }, {
             previous_model = previous_model,
           }))
 
-          A.same(prepared.persisted_lines, {
-            '<<<<<<< Ours',
-            'main',
-            '||||||| Base',
-            'main',
-            '=======',
-            'feature',
-            '>>>>>>> Theirs',
-          })
+          A.equal(prepared.model.conflicts[1].state, 'ours')
+          A.truthy(prepared.model.conflicts[1].handled)
+          A.same(prepared.persisted_lines, { 'main' })
 
           repo:write(repo.files.tracked, prepared.persisted_text)
 
           local reopened = assert(merge_model.build(file))
-          A.equal(reopened.conflicts[1].state, 'ours')
-          A.truthy(reopened.conflicts[1].ours_handled)
-          A.falsy(reopened.conflicts[1].theirs_handled)
-          A.falsy(reopened.conflicts[1].handled)
-          A.equal(reopened.unresolved_count, 1)
+          A.equal(reopened.conflicts[1].state, 'manual_resolved')
+          A.truthy(reopened.conflicts[1].handled)
+          A.equal(reopened.unresolved_count, 0)
           A.same(reopened.result_lines, { 'main' })
         end)
       end,
@@ -854,7 +584,7 @@ return {
       end,
     },
     {
-      name = 'accept ours keeps add/add conflicts visible and serializable with an empty base',
+      name = 'accept ours resolves add/add conflicts with an empty base',
       run = function()
         N.with_repo('repo_conflict_add_add', function(repo)
           local git = require('glance.git')
@@ -868,23 +598,15 @@ return {
             previous_model = previous_model,
           }))
 
-          A.same(prepared.persisted_lines, {
-            '<<<<<<< Ours',
-            'main add',
-            '||||||| Base',
-            'main add',
-            '=======',
-            'feature add',
-            '>>>>>>> Theirs',
-          })
+          A.same(prepared.persisted_lines, { 'main add' })
 
           repo:write(repo.files.tracked, prepared.persisted_text)
 
           local reopened = assert(merge_model.build(file))
-          A.equal(reopened.conflicts[1].state, 'ours')
+          A.equal(reopened.conflicts[1].state, 'manual_resolved')
           A.equal(reopened.conflicts[1].result_range.start, 1)
           A.equal(reopened.conflicts[1].result_range.count, 1)
-          A.equal(reopened.unresolved_count, 1)
+          A.equal(reopened.unresolved_count, 0)
           A.same(reopened.result_lines, { 'main add' })
         end)
       end,

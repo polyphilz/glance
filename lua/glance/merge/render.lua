@@ -73,7 +73,7 @@ local function conflict_state_label(conflict)
 end
 
 local function conflict_marker_group(conflict)
-  if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
+  if conflict.state == 'manual_unresolved' then
     return 'GlanceConflictMarkerManual'
   end
   if conflict.handled then
@@ -83,13 +83,22 @@ local function conflict_marker_group(conflict)
 end
 
 local function conflict_state_group(conflict)
-  if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
+  if conflict.state == 'manual_unresolved' then
     return 'GlanceConflictStateManual'
   end
   if conflict.handled then
     return 'GlanceConflictStateHandled'
   end
   return 'GlanceConflictStateUnresolved'
+end
+
+local function action_bar_padding()
+  local minimap = config.options.minimap or {}
+  if not minimap.enabled then
+    return ''
+  end
+
+  return string.rep(' ', (minimap.width or 1) + 1)
 end
 
 local function result_label(model, active_conflict_index)
@@ -114,7 +123,7 @@ local function result_label(model, active_conflict_index)
   local label = table.concat(parts, ' | ')
   local hint = conflict and actions.hint_text(conflict, config.options.merge.keymaps) or ''
   if hint ~= '' then
-    return label .. '%=' .. hint
+    return label .. '%=' .. hint .. action_bar_padding()
   end
   return label
 end
@@ -191,7 +200,16 @@ local function add_result_range(buf, start_line, count, line_group, opts)
 end
 
 local function zero_line_placeholder(conflict)
-  return '[' .. conflict_state_label(conflict) .. ']'
+  return '  ' .. conflict_state_label(conflict) .. ' insert'
+end
+
+local function zero_line_anchor(conflict, line_count)
+  local start_line = conflict.result_range.start or 1
+  if start_line <= line_count then
+    return math.max(start_line, 1) - 1, true
+  end
+
+  return math.max(line_count, 1) - 1, false
 end
 
 local function decorate_sources(buffers, model, active_conflict_index)
@@ -210,11 +228,12 @@ local function decorate_sources(buffers, model, active_conflict_index)
       number_group = active_number_group,
     })
 
-    local line_count = math.max(vim.api.nvim_buf_line_count(buffers.result), 1)
-    local anchor_line = math.min(math.max(conflict.result_range.start, 1), line_count) - 1
     if conflict.result_range.count == 0 then
+      local line_count = math.max(vim.api.nvim_buf_line_count(buffers.result), 1)
+      local anchor_line, virt_lines_above = zero_line_anchor(conflict, line_count)
       local extmark_opts = {
         virt_lines = { { { zero_line_placeholder(conflict), conflict_marker_group(conflict) } } },
+        virt_lines_above = virt_lines_above,
         priority = 100,
       }
       if active_number_group then
@@ -223,6 +242,7 @@ local function decorate_sources(buffers, model, active_conflict_index)
 
       vim.api.nvim_buf_set_extmark(buffers.result, NS, anchor_line, 0, {
         virt_lines = extmark_opts.virt_lines,
+        virt_lines_above = extmark_opts.virt_lines_above,
         priority = extmark_opts.priority,
         number_hl_group = extmark_opts.number_hl_group,
       })

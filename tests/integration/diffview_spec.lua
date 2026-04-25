@@ -160,7 +160,9 @@ return {
           A.equal(vim.api.nvim_get_option_value('buftype', { buf = result_buf }), '')
           A.equal(vim.api.nvim_get_option_value('readonly', { buf = result_buf }), false)
           A.equal(vim.api.nvim_get_option_value('modifiable', { buf = result_buf }), true)
-          A.equal(minimap.win, nil)
+          A.truthy(minimap.win and vim.api.nvim_win_is_valid(minimap.win))
+          A.equal(minimap.mode, 'merge')
+          A.equal(minimap.target_win, result_win)
           A.same(vim.api.nvim_buf_get_lines(theirs_buf, 0, -1, false), { 'feature' })
           A.same(vim.api.nvim_buf_get_lines(ours_buf, 0, -1, false), { 'main' })
           A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'base' })
@@ -257,16 +259,20 @@ return {
           local result_win = workspace.get_win(diffview.workspace, 'merge_result')
           local marks = merge_extmarks(result_buf)
           local placeholder = ''
+          local placeholder_above = false
 
           for _, mark in ipairs(marks) do
             if mark[4] and mark[4].virt_lines and mark[4].virt_lines[1] and mark[4].virt_lines[1][1] then
               placeholder = mark[4].virt_lines[1][1][1]
+              placeholder_above = mark[4].virt_lines_above == true
               break
             end
           end
 
           A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'alpha', 'omega' })
           A.contains(placeholder, 'unresolved')
+          A.contains(placeholder, 'insert')
+          A.truthy(placeholder_above)
           A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 2)
 
           vim.api.nvim_buf_set_lines(result_buf, 1, 1, false, { 'draft insert' })
@@ -327,7 +333,6 @@ return {
           }
 
           N.press('\\o')
-          N.press('\\T')
 
           vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, expected_result)
           vim.api.nvim_buf_call(result_buf, function()
@@ -378,7 +383,6 @@ return {
           A.equal(vim.api.nvim_get_option_value('endofline', { buf = result_buf }), false)
 
           N.press('\\o')
-          N.press('\\T')
           vim.api.nvim_set_option_value('endofline', false, { buf = result_buf })
           vim.api.nvim_buf_call(result_buf, function()
             vim.cmd('write')
@@ -405,7 +409,6 @@ return {
           local result_win = workspace.get_win(diffview.workspace, 'merge_result')
 
           N.press('\\o')
-          N.press('\\T')
 
           vim.api.nvim_buf_call(result_buf, function()
             vim.cmd('write')
@@ -510,7 +513,70 @@ return {
       end,
     },
     {
-      name = 'merge action bar renders configured keys and accept ours persists partial progress',
+      name = 'merge minimap renders conflict states and active conflict changes',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+          local logic = require('glance.minimap_logic')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+          A.truthy(minimap.win and vim.api.nvim_win_is_valid(minimap.win))
+          A.equal(minimap.mode, 'merge')
+          A.equal(minimap.target_win, result_win)
+          A.contains(minimap.cached_pixels, logic.states.MERGE_ACTIVE)
+          A.contains(minimap.cached_pixels, logic.states.MERGE_UNRESOLVED)
+
+          N.press('\\o')
+          N.press(']x')
+
+          A.contains(minimap.cached_pixels, logic.states.MERGE_HANDLED)
+          A.contains(minimap.cached_pixels, logic.states.MERGE_ACTIVE)
+        end)
+      end,
+    },
+    {
+      name = 'merge minimap renders manual conflict state before explicit resolution',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local minimap = require('glance.minimap')
+          local logic = require('glance.minimap_logic')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          vim.api.nvim_buf_set_lines(result_buf, 1, 2, false, { 'manual first resolution' })
+          vim.api.nvim_exec_autocmds('TextChanged', {
+            buffer = result_buf,
+            modeline = false,
+          })
+
+          N.press(']x')
+          A.contains(minimap.cached_pixels, logic.states.MERGE_MANUAL)
+          A.contains(minimap.cached_pixels, logic.states.MERGE_ACTIVE)
+
+          N.press('[x')
+          N.press('\\m')
+          N.press(']x')
+
+          A.contains(minimap.cached_pixels, logic.states.MERGE_HANDLED)
+          A.contains(minimap.cached_pixels, logic.states.MERGE_ACTIVE)
+        end)
+      end,
+    },
+    {
+      name = 'merge action bar renders configured keys and accept ours resolves immediately',
       run = function()
         N.with_repo('repo_conflict', function(repo)
           require('glance').start()
@@ -531,29 +597,23 @@ return {
           A.contains(winbar, '1/1')
           A.contains(winbar, 'unresolved')
           A.contains(winbar, '\\o ours')
-          A.contains(winbar, '\\O skip ours')
+          A.contains(winbar, '\\t theirs')
+          A.contains(winbar, '\\O both o/t')
+          A.contains(winbar, '\\T both t/o')
+          A.contains(winbar, '\\b base')
 
           N.press('\\o')
 
           A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'main' })
           winbar = vim.api.nvim_get_option_value('winbar', { win = result_win })
-          A.contains(winbar, 'pending: ours')
-          A.contains(winbar, '1 unresolved')
+          A.contains(winbar, 'handled: ours')
+          A.contains(winbar, '0 unresolved')
 
           vim.api.nvim_buf_call(result_buf, function()
             vim.cmd('write')
           end)
 
-          A.equal(repo:read(repo.files.tracked), table.concat({
-            '<<<<<<< Ours',
-            'main',
-            '||||||| Base',
-            'main',
-            '=======',
-            'feature',
-            '>>>>>>> Theirs',
-            '',
-          }, '\n'))
+          A.equal(repo:read(repo.files.tracked), 'main\n')
 
           diffview.close(true)
           ui.open_file(filetree.files.conflicts[1])
@@ -562,8 +622,8 @@ return {
           local reopened_win = workspace.get_win(diffview.workspace, 'merge_result')
           A.same(vim.api.nvim_buf_get_lines(reopened_buf, 0, -1, false), { 'main' })
           winbar = vim.api.nvim_get_option_value('winbar', { win = reopened_win })
-          A.contains(winbar, 'pending: ours')
-          A.contains(winbar, '1 unresolved')
+          A.contains(winbar, 'manual resolved')
+          A.contains(winbar, '0 unresolved')
         end)
       end,
     },
@@ -583,7 +643,6 @@ return {
           local result_win = workspace.get_win(diffview.workspace, 'merge_result')
 
           N.press('\\o')
-          N.press('\\T')
 
           A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), { 'main' })
           A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '0 unresolved')

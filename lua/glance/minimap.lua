@@ -17,7 +17,10 @@ local CONTENT_DEBOUNCE_MS = 120
 M.buf = nil
 M.win = nil
 M.target_win = nil
+M.mode = nil
 M.old_lines = nil       -- cached old content for vim.diff()
+M.merge_model = nil
+M.active_conflict_index = nil
 M.cached_pixels = nil   -- cached pixel states (only recomputed on content change)
 M.pixel_count = 0
 M.total_logical = 0
@@ -37,6 +40,10 @@ local ADD = logic.states.ADD
 local DELETE = logic.states.DELETE
 local CHANGE = logic.states.CHANGE
 local CURSOR = logic.states.CURSOR
+local MERGE_UNRESOLVED = logic.states.MERGE_UNRESOLVED
+local MERGE_HANDLED = logic.states.MERGE_HANDLED
+local MERGE_MANUAL = logic.states.MERGE_MANUAL
+local MERGE_ACTIVE = logic.states.MERGE_ACTIVE
 
 -- Dynamic highlight group cache
 local hl_cache = {}
@@ -51,18 +58,27 @@ end
 
 local function colors()
   local palette = config.options.theme.palette
+  local manual = palette.manual or palette.number or palette.keyword
   return {
     [NONE] = palette.minimap_bg,
     [ADD] = palette.added,
     [DELETE] = palette.deleted,
     [CHANGE] = palette.changed,
     [CURSOR] = palette.minimap_cursor,
+    [MERGE_UNRESOLVED] = palette.changed,
+    [MERGE_HANDLED] = palette.added,
+    [MERGE_MANUAL] = manual,
+    [MERGE_ACTIVE] = palette.minimap_cursor,
   }, {
     [NONE] = palette.minimap_viewport_bg,
     [ADD] = palette.added,
     [DELETE] = palette.deleted,
     [CHANGE] = palette.changed,
     [CURSOR] = palette.minimap_cursor,
+    [MERGE_UNRESOLVED] = palette.changed,
+    [MERGE_HANDLED] = palette.added,
+    [MERGE_MANUAL] = manual,
+    [MERGE_ACTIVE] = palette.minimap_cursor,
   }
 end
 
@@ -126,7 +142,10 @@ local function has_valid_state()
   return M.buf and vim.api.nvim_buf_is_valid(M.buf)
     and M.win and vim.api.nvim_win_is_valid(M.win)
     and M.target_win and vim.api.nvim_win_is_valid(M.target_win)
-    and M.old_lines ~= nil
+    and (
+      (M.mode == 'diff' and M.old_lines ~= nil)
+      or (M.mode == 'merge' and M.merge_model ~= nil)
+    )
 end
 
 local function target_buf()
@@ -335,7 +354,16 @@ function M.full_update(opts)
   end
 
   local new_lines = vim.api.nvim_buf_get_lines(new_buf, 0, -1, false)
-  local line_types, total_lines = logic.compute_line_types(M.old_lines, new_lines)
+  local line_types, total_lines
+  if M.mode == 'merge' then
+    line_types, total_lines = logic.compute_merge_line_types(
+      M.merge_model.conflicts,
+      math.max(#new_lines, vim.api.nvim_buf_line_count(new_buf)),
+      M.active_conflict_index
+    )
+  else
+    line_types, total_lines = logic.compute_line_types(M.old_lines, new_lines)
+  end
   M.total_logical = total_lines
   M.cached_pixels = logic.downsample(line_types, total_lines, pixel_count)
   M.last_changedtick = changedtick
@@ -346,17 +374,11 @@ function M.full_update(opts)
   render_from_cache()
 end
 
---- Create the floating window and buffer, then do initial render.
---- @param target_win number  The new (right) diff pane window
---- @param old_lines string[]  Old file content for diff computation
-function M.open(target_win, old_lines)
-  M.close()
-
+local function open_window(target_win)
   if not minimap_config().enabled then return end
   if not target_win or not vim.api.nvim_win_is_valid(target_win) then return end
 
   M.target_win = target_win
-  M.old_lines = old_lines
 
   -- Create scratch buffer
   M.buf = vim.api.nvim_create_buf(false, true)
@@ -387,6 +409,42 @@ function M.open(target_win, old_lines)
   -- Initial render
   M.full_update({ force_recompute = true })
   M.setup_autocmds()
+end
+
+--- Create the floating window and buffer, then do initial render.
+--- @param target_win number  The new (right) diff pane window
+--- @param old_lines string[]  Old file content for diff computation
+function M.open(target_win, old_lines)
+  M.close()
+  M.mode = 'diff'
+  M.old_lines = old_lines
+  M.merge_model = nil
+  M.active_conflict_index = nil
+  open_window(target_win)
+end
+
+--- Create a merge minimap on the Result pane.
+--- @param target_win number
+--- @param merge_model table
+--- @param active_conflict_index integer|nil
+function M.open_merge(target_win, merge_model, active_conflict_index)
+  M.close()
+  M.mode = 'merge'
+  M.old_lines = nil
+  M.merge_model = merge_model
+  M.active_conflict_index = active_conflict_index
+  open_window(target_win)
+end
+
+--- Update merge minimap state after conflict actions, edits, or active conflict changes.
+function M.update_merge(merge_model, active_conflict_index)
+  if M.mode ~= 'merge' or not M.win or not vim.api.nvim_win_is_valid(M.win) then
+    return
+  end
+
+  M.merge_model = merge_model
+  M.active_conflict_index = active_conflict_index
+  M.full_update({ force_recompute = true })
 end
 
 --- Set up autocmds for scroll sync and content change tracking.
@@ -443,7 +501,10 @@ function M.close()
   M.win = nil
   M.buf = nil
   M.target_win = nil
+  M.mode = nil
   M.old_lines = nil
+  M.merge_model = nil
+  M.active_conflict_index = nil
   M.cached_pixels = nil
   M.pixel_count = 0
   M.total_logical = 0

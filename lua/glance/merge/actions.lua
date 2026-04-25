@@ -7,8 +7,7 @@ local DEFINITIONS = {
   { id = 'accept_theirs', short = 'theirs' },
   { id = 'accept_both_ours_then_theirs', short = 'both o/t' },
   { id = 'accept_both_theirs_then_ours', short = 'both t/o' },
-  { id = 'ignore_ours', short = 'skip ours' },
-  { id = 'ignore_theirs', short = 'skip theirs' },
+  { id = 'keep_base', short = 'base' },
   { id = 'reset_conflict', short = 'reset' },
   { id = 'mark_resolved', short = 'resolve' },
 }
@@ -31,10 +30,6 @@ function M.available(conflict)
     local id = definition.id
     if id == 'mark_resolved' then
       if conflict.state == 'manual_unresolved' then
-        actions[#actions + 1] = definition
-      end
-    elseif id == 'ignore_ours' or id == 'ignore_theirs' then
-      if conflict.state ~= 'manual_unresolved' and conflict.state ~= 'manual_resolved' then
         actions[#actions + 1] = definition
       end
     else

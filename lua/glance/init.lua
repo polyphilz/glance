@@ -151,13 +151,14 @@ function M.setup_highlights()
   local keyword = palette.keyword
   local func = palette.func
   local type_color = palette.type
+  local manual_color = palette.manual or palette.number or palette.keyword
   local number = palette.number
   local param = palette.accent
   local selection = palette.selection
   local line_hl = palette.line_highlight
-  local merge_unresolved_bg = blend_hex(bg, palette.logo, 0.16)
+  local merge_unresolved_bg = blend_hex(bg, palette.changed, 0.2)
   local merge_handled_bg = blend_hex(bg, palette.added, 0.16)
-  local merge_manual_bg = blend_hex(bg, type_color, 0.14)
+  local merge_manual_bg = blend_hex(bg, manual_color, 0.18)
 
   -- Editor
   vim.api.nvim_set_hl(0, 'Normal', { bg = bg, fg = fg })
@@ -257,9 +258,9 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, 'GlanceAccentText', { fg = param, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceLegendText', { fg = comment, bg = bg })
   vim.api.nvim_set_hl(0, 'GlanceLegendHint', { fg = palette.accent, bg = bg, bold = true })
-  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerUnresolved', { fg = palette.logo, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerUnresolved', { fg = palette.changed, bg = bg, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceConflictMarkerHandled', { fg = palette.added, bg = bg, bold = true })
-  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerManual', { fg = type_color, bg = bg, bold = true })
+  vim.api.nvim_set_hl(0, 'GlanceConflictMarkerManual', { fg = manual_color, bg = bg, bold = true })
   vim.api.nvim_set_hl(0, 'GlanceConflictStateUnresolved', { bg = merge_unresolved_bg })
   vim.api.nvim_set_hl(0, 'GlanceConflictStateHandled', { bg = merge_handled_bg })
   vim.api.nvim_set_hl(0, 'GlanceConflictStateManual', { bg = merge_manual_bg })
