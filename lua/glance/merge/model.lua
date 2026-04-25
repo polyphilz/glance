@@ -444,6 +444,7 @@ end
 local function collect_outcomes_strict(conflict, current_lines, cursor, next_stable, is_last, opts)
   local outcomes = {}
   local seen = {}
+  local manual_state = manual_clean_state(opts)
 
   local function add_outcome(outcome, next_cursor)
     local key = outcome_key(outcome, next_cursor)
@@ -458,11 +459,11 @@ local function collect_outcomes_strict(conflict, current_lines, cursor, next_sta
 
   local block, block_next = parse_conflict_block(current_lines, cursor)
   if block then
-      add_outcome(exact_marker_outcome(conflict, block) or {
-        state = 'manual_unresolved',
-        current_lines = block.full_lines,
-        kind = 'marker',
-        display_lines = conflict.base_lines,
+    add_outcome(exact_marker_outcome(conflict, block) or {
+      state = 'manual_unresolved',
+      current_lines = block.full_lines,
+      kind = 'marker',
+      display_lines = conflict.base_lines,
       ours_handled = false,
       theirs_handled = false,
     }, block_next)
@@ -470,18 +471,10 @@ local function collect_outcomes_strict(conflict, current_lines, cursor, next_sta
 
   for _, candidate in ipairs(clean_candidates(conflict)) do
     if same_lines_at(current_lines, cursor, candidate.lines) then
-      add_outcome({
-        state = candidate.state,
-        current_lines = candidate.lines,
-        kind = 'clean',
-        display_lines = candidate.lines,
-        ours_handled = true,
-        theirs_handled = true,
-      }, cursor + #candidate.lines)
+      add_outcome(manual_outcome(conflict, manual_state, candidate.lines), cursor + #candidate.lines)
     end
   end
 
-  local manual_state = manual_clean_state(opts)
   if is_last then
     if #next_stable == 0 then
       add_outcome(manual_outcome(conflict, manual_state, slice_lines(current_lines, cursor, #current_lines)), #current_lines + 1)
@@ -596,9 +589,10 @@ local function occurrence_key(occurrence)
   }, ':')
 end
 
-local function collect_relaxed_occurrences(conflict, current_lines, cursor, marker_ranges)
+local function collect_relaxed_occurrences(conflict, current_lines, cursor, marker_ranges, opts)
   local occurrences = {}
   local seen = {}
+  local manual_state = manual_clean_state(opts)
 
   local function add_occurrence(occurrence)
     local key = occurrence_key(occurrence)
@@ -641,13 +635,14 @@ local function collect_relaxed_occurrences(conflict, current_lines, cursor, mark
   for _, candidate in ipairs(clean_candidates(conflict)) do
     if #candidate.lines == 0 then
       for position = cursor, #current_lines + 1 do
+        local outcome = manual_outcome(conflict, manual_state, candidate.lines)
         add_occurrence({
-          state = candidate.state,
-          current_lines = candidate.lines,
-          kind = 'clean',
-          display_lines = candidate.lines,
-          ours_handled = true,
-          theirs_handled = true,
+          state = outcome.state,
+          current_lines = outcome.current_lines,
+          kind = outcome.kind,
+          display_lines = outcome.display_lines,
+          ours_handled = outcome.ours_handled,
+          theirs_handled = outcome.theirs_handled,
           start = position,
           stop = position - 1,
         })
@@ -655,13 +650,14 @@ local function collect_relaxed_occurrences(conflict, current_lines, cursor, mark
     else
       for _, position in ipairs(find_sequence_positions(current_lines, candidate.lines, cursor)) do
         if not position_in_ranges(position, marker_ranges) then
+          local outcome = manual_outcome(conflict, manual_state, candidate.lines)
           add_occurrence({
-            state = candidate.state,
-            current_lines = candidate.lines,
-            kind = 'clean',
-            display_lines = candidate.lines,
-            ours_handled = true,
-            theirs_handled = true,
+            state = outcome.state,
+            current_lines = outcome.current_lines,
+            kind = outcome.kind,
+            display_lines = outcome.display_lines,
+            ours_handled = outcome.ours_handled,
+            theirs_handled = outcome.theirs_handled,
             start = position,
             stop = position + #candidate.lines - 1,
           })
@@ -686,7 +682,7 @@ local function collect_relaxed_occurrences(conflict, current_lines, cursor, mark
   return occurrences
 end
 
-local function infer_conflict_states_relaxed(canonical_stable_segments, conflicts, current_lines)
+local function infer_conflict_states_relaxed(canonical_stable_segments, conflicts, current_lines, opts)
   local marker_ranges = conflict_marker_ranges(current_lines)
   local memo = {}
 
@@ -710,7 +706,7 @@ local function infer_conflict_states_relaxed(canonical_stable_segments, conflict
     local best = nil
     local expected_stable = canonical_stable_segments[index] or {}
 
-    for _, occurrence in ipairs(collect_relaxed_occurrences(conflicts[index], current_lines, cursor, marker_ranges)) do
+    for _, occurrence in ipairs(collect_relaxed_occurrences(conflicts[index], current_lines, cursor, marker_ranges, opts)) do
       local tail = solve(index + 1, occurrence.stop + 1)
       if tail then
         local stable_before = slice_lines(current_lines, cursor, occurrence.start - 1)
@@ -933,7 +929,7 @@ local function build_model(file, opts)
   local resolved_stable_segments = stable_segments
   local outcomes = infer_conflict_states_strict(stable_segments, conflicts, current_lines, opts)
   if not outcomes then
-    resolved_stable_segments, outcomes = infer_conflict_states_relaxed(stable_segments, conflicts, current_lines)
+    resolved_stable_segments, outcomes = infer_conflict_states_relaxed(stable_segments, conflicts, current_lines, opts)
     if stable_segments_contain_conflict_markers(resolved_stable_segments) then
       resolved_stable_segments = stable_segments
       outcomes = nil
@@ -952,20 +948,21 @@ local function build_model(file, opts)
           and type(previous_result) == 'table'
           and same_lines(conflict.current_result_lines or {}, previous_result)
         then
-          if previous.state == 'manual_resolved' and conflict.state == 'manual_unresolved' then
-            conflict.state = 'manual_resolved'
-            conflict.ours_handled = true
-            conflict.theirs_handled = true
-            conflict.handled = true
-          elseif previous.handled == false then
-            conflict.state = previous.state
-            conflict.ours_handled = previous.ours_handled == true
-            conflict.theirs_handled = previous.theirs_handled == true
-            conflict.handled = false
-          end
+          conflict.state = previous.state
+          conflict.ours_handled = previous.ours_handled == true
+          conflict.theirs_handled = previous.theirs_handled == true
+          conflict.handled = previous.handled == true
 
-          conflict.current_result_lines = previous_result
-          conflict.current_lines = previous_result
+          if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
+            conflict.current_result_lines = vim.deepcopy(previous_result)
+            conflict.current_lines = conflict.current_result_lines
+            conflict.current_kind = 'manual'
+          else
+            conflict.current_result_lines =
+              current_result_lines_for(conflict, conflict.state, vim.deepcopy(previous_result))
+            conflict.current_lines = conflict.current_result_lines
+            conflict.current_kind = 'clean'
+          end
         end
       end
     end
@@ -1060,14 +1057,6 @@ local function build_persisted_lines(merge_model)
   return lines
 end
 
-local function state_includes_ours(state)
-  return state == 'ours' or state == 'both_ours_then_theirs' or state == 'both_theirs_then_ours'
-end
-
-local function state_includes_theirs(state)
-  return state == 'theirs' or state == 'both_ours_then_theirs' or state == 'both_theirs_then_ours'
-end
-
 local function finalize_conflict_action(conflict)
   if conflict.state == 'manual_resolved' then
     conflict.ours_handled = true
@@ -1089,29 +1078,6 @@ local function finalize_conflict_action(conflict)
 
   conflict.handled = conflict.state == 'manual_resolved'
     or (conflict.ours_handled and conflict.theirs_handled)
-end
-
-local function accept_state(current_state, side)
-  local includes_ours = state_includes_ours(current_state)
-  local includes_theirs = state_includes_theirs(current_state)
-
-  if side == 'ours' then
-    if includes_ours then
-      return current_state
-    end
-    if includes_theirs then
-      return 'both_theirs_then_ours'
-    end
-    return 'ours'
-  end
-
-  if includes_theirs then
-    return current_state
-  end
-  if includes_ours then
-    return 'both_ours_then_theirs'
-  end
-  return 'theirs'
 end
 
 function M.build(file, opts)
@@ -1163,7 +1129,7 @@ function M.apply_action(merge_model, index, action)
 
   if action == 'accept_ours' or action == 'accept_theirs' then
     local side = action == 'accept_ours' and 'ours' or 'theirs'
-    conflict.state = accept_state(conflict.state, side)
+    conflict.state = side == 'ours' and 'ours' or 'theirs'
     if side == 'ours' then
       conflict.ours_handled = true
     else
