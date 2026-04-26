@@ -111,6 +111,27 @@ local function new_fixture(root)
     return self:git({ 'commit', '-m', message or 'Test fixture commit' })
   end
 
+  function fixture:hash_blob(content, mode)
+    local path = vim.fn.tempname()
+    write_file(path, content, mode or 'w')
+    local oid = vim.trim(run_command({ 'git', '-C', self.root, 'hash-object', '-w', path }))
+    vim.fn.delete(path, 'rf')
+    return oid
+  end
+
+  function fixture:update_index_info(entries)
+    local lines = {}
+    for _, entry in ipairs(entries) do
+      lines[#lines + 1] = string.format('%s %s %d\t%s', entry.mode or '100644', entry.oid, entry.stage, entry.path)
+    end
+
+    local output = vim.fn.system({ 'git', '-C', self.root, 'update-index', '--index-info' }, table.concat(lines, '\n') .. '\n')
+    if vim.v.shell_error ~= 0 then
+      error('git update-index --index-info\n' .. output)
+    end
+    return output
+  end
+
   function fixture:cleanup()
     vim.fn.delete(self.root, 'rf')
   end
@@ -348,6 +369,93 @@ function scenarios.repo_conflict_zero_line(fixture)
     fixture:git({ 'merge', 'feature' })
   end)
   assert(not ok, 'expected zero-line merge conflict fixture')
+end
+
+function scenarios.repo_conflict_modify_delete(fixture)
+  seed_committed_file(fixture, 'tracked.txt', 'base\n')
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, 'feature modified\n')
+  fixture:commit_all('Feature modifies')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:remove(fixture.files.tracked)
+  fixture:commit_all('Main deletes')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected modify/delete conflict fixture')
+end
+
+function scenarios.repo_conflict_binary(fixture)
+  fixture.files.binary = 'assets/conflict.bin'
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 3), 'wb')
+  fixture:stage(fixture.files.binary)
+  fixture:git({ 'commit', '-m', 'Seed binary conflict fixture' })
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 4), 'wb')
+  fixture:commit_all('Feature binary change')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.binary, binary_blob(0, 1, 2, 5), 'wb')
+  fixture:commit_all('Main binary change')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected binary conflict fixture')
+end
+
+function scenarios.repo_conflict_non_text_add_add(fixture)
+  seed_committed_file(fixture, 'anchor.txt', 'anchor\n', 'anchor')
+  fixture.files.binary = 'assets/add.bin'
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.binary, binary_blob(0, 7, 7), 'wb')
+  fixture:commit_all('Feature binary add')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.binary, binary_blob(0, 8, 8), 'wb')
+  fixture:commit_all('Main binary add')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected non-text add/add conflict fixture')
+end
+
+function scenarios.repo_conflict_rename_delete(fixture)
+  seed_committed_file(fixture, 'old.txt', 'base\n', 'old')
+  fixture.files.renamed = 'renamed.txt'
+
+  local base_oid = fixture:hash_blob('base\n')
+  local ours_oid = fixture:hash_blob('ours renamed\n')
+  fixture:git({ 'rm', '-q', '--cached', fixture.files.old })
+  fixture:update_index_info({
+    { mode = '100644', oid = base_oid, stage = 1, path = fixture.files.old },
+    { mode = '100644', oid = ours_oid, stage = 2, path = fixture.files.renamed },
+  })
+end
+
+function scenarios.repo_conflict_rename_rename(fixture)
+  seed_committed_file(fixture, 'old.txt', 'base\n', 'old')
+  fixture.files.ours = 'ours.txt'
+  fixture.files.theirs = 'theirs.txt'
+
+  local base_oid = fixture:hash_blob('base\n')
+  local ours_oid = fixture:hash_blob('ours renamed\n')
+  local theirs_oid = fixture:hash_blob('theirs renamed\n')
+  fixture:git({ 'rm', '-q', '--cached', fixture.files.old })
+  fixture:update_index_info({
+    { mode = '100644', oid = base_oid, stage = 1, path = fixture.files.old },
+    { mode = '100644', oid = ours_oid, stage = 2, path = fixture.files.ours },
+    { mode = '100644', oid = theirs_oid, stage = 3, path = fixture.files.theirs },
+  })
 end
 
 function scenarios.repo_type_change(fixture)

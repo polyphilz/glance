@@ -36,6 +36,8 @@ M._repo_root_cwd = nil
 M._git_dir = nil
 M._git_dir_root = nil
 
+local enrich_conflict_files
+
 local function empty_files()
   return { staged = {}, changes = {}, untracked = {}, conflicts = {} }
 end
@@ -362,6 +364,13 @@ local function discard_new_path(filepath)
   delete_worktree_path(filepath)
 end
 
+local function ensure_parent_dir(path)
+  local parent = vim.fn.fnamemodify(path, ':h')
+  if parent ~= '.' and parent ~= '' then
+    vim.fn.mkdir(parent, 'p')
+  end
+end
+
 --- Check if the current directory is inside a git repository.
 function M.is_repo()
   local result = vim.fn.system('git rev-parse --is-inside-work-tree 2>/dev/null')
@@ -419,6 +428,111 @@ local function build_file_entry(entry, section)
     y = entry.y,
     raw_status = entry.raw_status,
   }
+end
+
+local function parse_unmerged_stage_output(output)
+  local entries = {}
+  if type(output) ~= 'string' or output == '' then
+    return entries
+  end
+
+  for line in output:gmatch('[^\n]+') do
+    local mode, oid, stage, path = line:match('^(%d+)%s+([0-9a-f]+)%s+(%d)%s+(.+)$')
+    if mode and oid and stage and path then
+      entries[#entries + 1] = {
+        mode = mode,
+        oid = oid,
+        stage = tonumber(stage),
+        path = path,
+      }
+    end
+  end
+
+  return entries
+end
+
+local function entries_by_path(entries)
+  local by_path = {}
+  for _, entry in ipairs(entries or {}) do
+    by_path[entry.path] = by_path[entry.path] or {}
+    by_path[entry.path][entry.stage] = entry
+  end
+  return by_path
+end
+
+local function sorted_unique_paths(entries)
+  local paths = {}
+  local seen = {}
+  for _, entry in ipairs(entries or {}) do
+    if type(entry.path) == 'string' and entry.path ~= '' and not seen[entry.path] then
+      seen[entry.path] = true
+      paths[#paths + 1] = entry.path
+    end
+  end
+  table.sort(paths)
+  return paths
+end
+
+local function group_entries_for_paths(by_path, paths)
+  local entries = {}
+  for _, path in ipairs(paths or {}) do
+    for stage = 1, 3 do
+      local entry = by_path[path] and by_path[path][stage] or nil
+      if entry then
+        entries[#entries + 1] = entry
+      end
+    end
+  end
+  return entries
+end
+
+local function stage_map(entries)
+  local stages = {}
+  for _, entry in ipairs(entries or {}) do
+    stages[entry.stage] = entry
+  end
+  return stages
+end
+
+local function conflict_group_id(stages, paths)
+  local base = stages[1] and stages[1].path or nil
+  if base then
+    return 'base:' .. base
+  end
+  return 'paths:' .. table.concat(paths or {}, '\0')
+end
+
+local function conflict_display_path(stages, paths)
+  if stages[2] and stages[2].path then
+    return stages[2].path
+  end
+  if stages[3] and stages[3].path then
+    return stages[3].path
+  end
+  if stages[1] and stages[1].path then
+    return stages[1].path
+  end
+  return (paths or {})[1]
+end
+
+local function conflict_display_status(class)
+  local labels = {
+    modify_delete = 'MD',
+    rename_delete = 'RD',
+    rename_rename = 'RR',
+    non_text_add_add = 'AA',
+    binary = 'B',
+  }
+  return labels[class] or 'U'
+end
+
+local function path_has_conflict_entry(conflict_files, path)
+  for _, file in ipairs(conflict_files or {}) do
+    if file.path == path then
+      return true
+    end
+  end
+  return false
 end
 
 --- Parse `git status --porcelain=v1` into raw entries.
@@ -561,12 +675,17 @@ local function build_status_snapshot(output, head_oid, opts)
   if index_signature == nil then
     index_signature = index_signature_at_root(opts.root or M.repo_root())
   end
+  local files = M.build_file_sections(M.parse_porcelain_entries(output))
+  if opts.enrich_conflicts ~= false then
+    files = enrich_conflict_files(files)
+  end
+
   return {
     output = output,
     head_oid = head_oid,
     index_signature = index_signature,
     key = snapshot_key(output, head_oid, index_signature),
-    files = M.build_file_sections(M.parse_porcelain_entries(output)),
+    files = files,
   }
 end
 
@@ -644,6 +763,7 @@ function M.get_status_snapshot_async(callback, opts)
 
       callback(build_status_snapshot(output, head_oid, {
         root = root,
+        enrich_conflicts = opts.schedule_callback ~= false,
       }))
     end)
   end)
@@ -664,19 +784,272 @@ function M.get_unmerged_stage_entries(filepath)
   end
 
   local entries = {}
-  for line in output:gmatch('[^\n]+') do
-    local mode, oid, stage, path = line:match('^(%d+)%s+([0-9a-f]+)%s+(%d)%s+(.+)$')
-    if mode and oid and stage and path then
-      entries[tonumber(stage)] = {
-        mode = mode,
-        oid = oid,
-        stage = tonumber(stage),
-        path = path,
-      }
-    end
+  for _, entry in ipairs(parse_unmerged_stage_output(output)) do
+    entries[entry.stage] = entry
   end
 
   return entries
+end
+
+function M.get_all_unmerged_stage_entries()
+  local ok, output = M.run_git_capture({ 'ls-files', '-u' })
+  if not ok then
+    return {}
+  end
+
+  return parse_unmerged_stage_output(output)
+end
+
+function M.get_blob_text(oid)
+  if type(oid) ~= 'string' or oid == '' then
+    return ''
+  end
+
+  local root = M.repo_root()
+  if not root then
+    return ''
+  end
+
+  local result = vim.system({ 'git', '-C', root, 'cat-file', '-p', oid }):wait()
+  if result.code ~= 0 then
+    return ''
+  end
+
+  return result.stdout or ''
+end
+
+function M.blob_is_binary(oid)
+  if type(oid) ~= 'string' or oid == '' then
+    return false
+  end
+
+  local text = M.get_blob_text(oid)
+  local temp = vim.fn.tempname()
+  local file = io.open(temp, 'wb')
+  if not file then
+    return text:find('\0', 1, true) ~= nil
+  end
+
+  file:write(text or '')
+  file:close()
+
+  local result = vim.system({ 'git', 'diff', '--no-index', '--numstat', '--', '/dev/null', temp }, { text = true }):wait()
+  vim.fn.delete(temp, 'rf')
+
+  if result.code ~= 0 and result.code ~= 1 then
+    return false
+  end
+
+  local output = result.stdout or ''
+  for line in output:gmatch('[^\n]+') do
+    if line:match('^%-\t%-\t') then
+      return true
+    end
+  end
+
+  return false
+end
+
+function M.unmerged_stage_entries_are_binary(entries)
+  for _, entry in ipairs(entries or {}) do
+    if entry.mode ~= '100644' and entry.mode ~= '100755' then
+      return true
+    end
+    if M.blob_is_binary(entry.oid) then
+      return true
+    end
+  end
+
+  return false
+end
+
+function M.classify_conflict_entries(entries)
+  local stages = stage_map(entries)
+  local paths = sorted_unique_paths(entries)
+  local class = 'unsupported'
+
+  if stages[1] and stages[2] and stages[3] then
+    if stages[2].path ~= stages[3].path then
+      class = 'rename_rename'
+    elseif M.unmerged_stage_entries_are_binary({ stages[1], stages[2], stages[3] }) then
+      class = 'binary'
+    else
+      class = 'text'
+    end
+  elseif not stages[1] and stages[2] and stages[3] then
+    if M.unmerged_stage_entries_are_binary({ stages[2], stages[3] }) then
+      class = 'non_text_add_add'
+    else
+      class = 'text_add_add'
+    end
+  elseif stages[1] and (stages[2] or stages[3]) then
+    local content = stages[2] or stages[3]
+    if content.path == stages[1].path then
+      class = 'modify_delete'
+    else
+      class = 'rename_delete'
+    end
+  end
+
+  local deleted_side = nil
+  if stages[1] and stages[2] and not stages[3] then
+    deleted_side = 'theirs'
+  elseif stages[1] and stages[3] and not stages[2] then
+    deleted_side = 'ours'
+  end
+
+  return {
+    class = class,
+    stage_entries = stages,
+    paths = paths,
+    base_path = stages[1] and stages[1].path or nil,
+    ours_path = stages[2] and stages[2].path or nil,
+    theirs_path = stages[3] and stages[3].path or nil,
+    display_path = conflict_display_path(stages, paths),
+    group_id = conflict_group_id(stages, paths),
+    deleted_side = deleted_side,
+  }
+end
+
+function M.get_conflict_info(file)
+  if type(file) ~= 'table' then
+    return nil, 'invalid conflict target'
+  end
+
+  local all_entries = M.get_all_unmerged_stage_entries()
+  local by_path = entries_by_path(all_entries)
+  local group_paths = file.conflict_paths
+  local entries
+
+  if type(group_paths) == 'table' and #group_paths > 0 then
+    entries = group_entries_for_paths(by_path, group_paths)
+  elseif type(file.path) == 'string' and file.path ~= '' then
+    entries = group_entries_for_paths(by_path, { file.path })
+  else
+    entries = {}
+  end
+
+  if #entries == 0 then
+    return nil, 'no unmerged stage entries found'
+  end
+
+  local info = M.classify_conflict_entries(entries)
+  info.file = file
+  return info
+end
+
+local function structural_conflict_groups(conflict_files, unmerged_entries)
+  local by_path = entries_by_path(unmerged_entries)
+  local groups = {}
+  local grouped_paths = {}
+  local stage1_paths = {}
+
+  for _, entry in ipairs(unmerged_entries or {}) do
+    if entry.stage == 1 and not (by_path[entry.path] and (by_path[entry.path][2] or by_path[entry.path][3])) then
+      stage1_paths[#stage1_paths + 1] = entry.path
+    end
+  end
+
+  table.sort(stage1_paths)
+  for _, base_path in ipairs(stage1_paths) do
+    local paths = { base_path }
+    for _, entry in ipairs(unmerged_entries or {}) do
+      if entry.path ~= base_path
+        and (entry.stage == 2 or entry.stage == 3)
+        and by_path[entry.path]
+        and not by_path[entry.path][1]
+      then
+        paths[#paths + 1] = entry.path
+      end
+    end
+
+    if #paths > 1 then
+      table.sort(paths)
+      local entries = group_entries_for_paths(by_path, paths)
+      local info = M.classify_conflict_entries(entries)
+      if info.class == 'rename_delete' or info.class == 'rename_rename' then
+        groups[#groups + 1] = info
+        for _, path in ipairs(paths) do
+          grouped_paths[path] = true
+        end
+      end
+    end
+  end
+
+  for _, file in ipairs(conflict_files or {}) do
+    if not grouped_paths[file.path] then
+      local entries = group_entries_for_paths(by_path, { file.path })
+      local info = M.classify_conflict_entries(entries)
+      if info.class == 'non_text_add_add' or info.class == 'binary' or info.class == 'modify_delete' then
+        groups[#groups + 1] = info
+        grouped_paths[file.path] = true
+      end
+    end
+  end
+
+  return groups, grouped_paths
+end
+
+function enrich_conflict_files(files)
+  local conflicts = files and files.conflicts or nil
+  if not conflicts or #conflicts == 0 then
+    return files
+  end
+
+  local unmerged_entries = M.get_all_unmerged_stage_entries()
+  if #unmerged_entries == 0 then
+    return files
+  end
+
+  local groups, grouped_paths = structural_conflict_groups(conflicts, unmerged_entries)
+  if #groups == 0 then
+    return files
+  end
+
+  local next_conflicts = {}
+  for _, file in ipairs(conflicts) do
+    if not grouped_paths[file.path] then
+      next_conflicts[#next_conflicts + 1] = file
+    end
+  end
+
+  for _, info in ipairs(groups) do
+    if info.class ~= 'text' and info.class ~= 'text_add_add' then
+      local display_path = info.display_path
+      local matching = display_path and path_has_conflict_entry(conflicts, display_path) and display_path or nil
+      if not matching then
+        for _, path in ipairs(info.paths or {}) do
+          if path_has_conflict_entry(conflicts, path) then
+            matching = path
+            break
+          end
+        end
+      end
+
+      local base_file = nil
+      for _, file in ipairs(conflicts) do
+        if file.path == matching then
+          base_file = file
+          break
+        end
+      end
+      base_file = vim.deepcopy(base_file or conflicts[1] or {})
+      base_file.path = display_path
+      base_file.old_path = info.base_path ~= display_path and info.base_path or nil
+      base_file.display_status = conflict_display_status(info.class)
+      base_file.kind = 'conflicted'
+      base_file.conflict_class = info.class
+      base_file.conflict_paths = info.paths
+      base_file.conflict_group_id = info.group_id
+      next_conflicts[#next_conflicts + 1] = base_file
+    end
+  end
+
+  table.sort(next_conflicts, function(left, right)
+    return tostring(left.path) < tostring(right.path)
+  end)
+  files.conflicts = next_conflicts
+  return files
 end
 
 local function ref_name_label(ref)
@@ -1448,6 +1821,146 @@ function M.stage_merge_result(file)
   end
 
   return run_git({ 'add', '--', file.path })
+end
+
+local function conflict_side_entry(info, side)
+  if type(info) ~= 'table' or type(info.stage_entries) ~= 'table' then
+    return nil
+  end
+
+  if side == 'ours' then
+    return info.stage_entries[2]
+  end
+  if side == 'theirs' then
+    return info.stage_entries[3]
+  end
+
+  return nil
+end
+
+local function write_conflict_entry(entry)
+  local root = M.repo_root()
+  if not root or not entry or type(entry.path) ~= 'string' or entry.path == '' then
+    return false, 'invalid conflict entry'
+  end
+
+  local path = root .. '/' .. entry.path
+  ensure_parent_dir(path)
+
+  local file, open_err = io.open(path, 'wb')
+  if not file then
+    return false, tostring(open_err)
+  end
+
+  file:write(M.get_blob_text(entry.oid))
+  file:close()
+  return true
+end
+
+local function conflict_paths(info)
+  local paths = {}
+  local seen = {}
+  for _, path in ipairs((type(info) == 'table' and info.paths) or {}) do
+    if type(path) == 'string' and path ~= '' and not seen[path] then
+      seen[path] = true
+      paths[#paths + 1] = path
+    end
+  end
+  return paths
+end
+
+function M.special_conflict_side_kind(file_or_info, side)
+  local info = file_or_info
+  if type(info) == 'table' and not info.stage_entries then
+    info = M.get_conflict_info(info)
+  end
+  if not info then
+    return nil
+  end
+
+  return conflict_side_entry(info, side) and 'content' or 'deletion'
+end
+
+function M.apply_special_conflict_choice(file_or_info, side)
+  local info = file_or_info
+  if type(info) == 'table' and not info.stage_entries then
+    local err
+    info, err = M.get_conflict_info(info)
+    if not info then
+      return false, err
+    end
+  end
+
+  local entry = conflict_side_entry(info, side)
+  local paths = conflict_paths(info)
+  if #paths == 0 then
+    return false, 'no conflict paths found'
+  end
+
+  if entry then
+    local ok, err = write_conflict_entry(entry)
+    if not ok then
+      return false, err
+    end
+
+    for _, path in ipairs(paths) do
+      if path ~= entry.path then
+        delete_worktree_path(path)
+      end
+    end
+    return true
+  end
+
+  for _, path in ipairs(paths) do
+    delete_worktree_path(path)
+  end
+  return true
+end
+
+function M.complete_special_conflict_choice(file_or_info, side)
+  local info = file_or_info
+  if type(info) == 'table' and not info.stage_entries then
+    local err
+    info, err = M.get_conflict_info(info)
+    if not info then
+      return false, err
+    end
+  end
+
+  local entry = conflict_side_entry(info, side)
+  local paths = conflict_paths(info)
+  if #paths == 0 then
+    return false, 'no conflict paths found'
+  end
+
+  if entry then
+    local ok, err = run_git({ 'add', '--', entry.path })
+    if not ok then
+      return false, err
+    end
+
+    local remove_paths = {}
+    for _, path in ipairs(paths) do
+      if path ~= entry.path then
+        remove_paths[#remove_paths + 1] = path
+      end
+    end
+
+    if #remove_paths > 0 then
+      local args = { 'rm', '-f', '--' }
+      vim.list_extend(args, remove_paths)
+      ok, err = run_git(args)
+      if not ok then
+        return false, err
+      end
+    end
+
+    return true
+  end
+
+  local args = { 'rm', '-f', '--' }
+  vim.list_extend(args, paths)
+  return run_git(args)
 end
 
 --- Unstage all git-visible changes for a single file path set.

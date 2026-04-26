@@ -661,12 +661,12 @@ function M.open_file(file)
   end
 
   with_redraw_suppressed(function()
-    local is_binary = git.ensure_file_binary(file)
-
     -- Close welcome pane to make room for diff
     M.close_welcome()
 
-    if is_binary then
+    if kind == 'conflicted' then
+      diffview.open_conflict(file)
+    elseif git.ensure_file_binary(file) then
       diffview.open_binary(file)
     elseif kind == 'deleted' then
       diffview.open_deleted(file)
@@ -674,8 +674,6 @@ function M.open_file(file)
       diffview.open_untracked(file)
     elseif kind == 'added' and file.section ~= 'staged' then
       diffview.open_untracked(file)
-    elseif kind == 'conflicted' then
-      diffview.open_conflict(file)
     elseif kind == 'copied' then
       diffview.open_copied(file)
     elseif kind == 'type_changed' then

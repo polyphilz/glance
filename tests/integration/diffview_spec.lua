@@ -839,6 +839,140 @@ return {
       end,
     },
     {
+      name = 'special conflict panels require a choice before completing',
+      run = function()
+        N.with_repo('repo_conflict_binary', function()
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+          local messages, restore_notify = N.capture_notifications()
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local panel_win = workspace.get_win(diffview.workspace, 'merge_special')
+          local panel_buf = workspace.get_buf(diffview.workspace, 'merge_special')
+          A.same(diffview.content_roles(), { 'merge_special' })
+          A.truthy(panel_win and vim.api.nvim_win_is_valid(panel_win))
+          A.truthy(panel_buf and vim.api.nvim_buf_is_valid(panel_buf))
+          A.equal(vim.api.nvim_get_option_value('buftype', { buf = panel_buf }), 'nofile')
+          A.equal(vim.api.nvim_get_option_value('readonly', { buf = panel_buf }), true)
+          A.contains(table.concat(vim.api.nvim_buf_get_lines(panel_buf, 0, -1, false), '\n'), 'Binary Conflict')
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = panel_win }), 'no choice selected')
+
+          N.press('\\c')
+
+          local warned = false
+          for _, entry in ipairs(messages) do
+            if entry.msg:find('choose a conflict resolution', 1, true) then
+              warned = true
+              break
+            end
+          end
+          restore_notify()
+
+          A.truthy(warned)
+          A.truthy(ui.diff_open)
+          A.equal(#git.get_changed_files().conflicts, 1)
+        end)
+      end,
+    },
+    {
+      name = 'binary special conflicts can take theirs and complete',
+      run = function()
+        N.with_repo('repo_conflict_binary', function(repo)
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+
+          ui.open_file(filetree.files.conflicts[1])
+          N.press('\\t')
+          N.press('\\c')
+
+          local changed = git.get_changed_files()
+          A.falsy(ui.diff_open)
+          A.equal(#changed.conflicts, 0)
+          A.equal(repo:read(repo.files.binary), string.char(0, 1, 2, 4))
+        end)
+      end,
+    },
+    {
+      name = 'modify/delete special conflicts confirm deletions before completion',
+      run = function()
+        N.with_repo('repo_conflict_modify_delete', function(repo)
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local panel_buf = workspace.get_buf(diffview.workspace, 'merge_special')
+          local text = table.concat(vim.api.nvim_buf_get_lines(panel_buf, 0, -1, false), '\n')
+          A.contains(text, 'Modify/Delete Conflict')
+          A.contains(text, 'Ours | deleted')
+          A.contains(text, 'Theirs | stage 3 | modified')
+
+          N.with_confirm(2, function()
+            N.press('\\o')
+          end)
+          A.truthy(ui.diff_open)
+          A.truthy(vim.uv.fs_stat(repo:path(repo.files.tracked)))
+
+          N.with_confirm(1, function()
+            N.press('\\o')
+          end)
+          N.press('\\c')
+
+          local changed = git.get_changed_files()
+          A.falsy(ui.diff_open)
+          A.equal(#changed.conflicts, 0)
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.tracked)))
+        end)
+      end,
+    },
+    {
+      name = 'rename/rename special conflicts group paths and complete one side',
+      run = function()
+        N.with_repo('repo_conflict_rename_rename', function(repo)
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          A.equal(#filetree.files.conflicts, 1)
+          A.equal(filetree.files.conflicts[1].conflict_class, 'rename_rename')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local panel_buf = workspace.get_buf(diffview.workspace, 'merge_special')
+          local text = table.concat(vim.api.nvim_buf_get_lines(panel_buf, 0, -1, false), '\n')
+          A.contains(text, 'Rename/Rename Conflict')
+          A.contains(text, repo.files.ours)
+          A.contains(text, repo.files.theirs)
+          A.contains(text, 'Keep both needs another output path')
+
+          N.with_confirm(1, function()
+            N.press('\\t')
+          end)
+          N.press('\\c')
+
+          local changed = git.get_changed_files()
+          A.falsy(ui.diff_open)
+          A.equal(#changed.conflicts, 0)
+          A.equal(repo:read(repo.files.theirs), 'theirs renamed\n')
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.ours)))
+        end)
+      end,
+    },
+    {
       name = 'complete merge refuses unresolved conflicts and manual edits that are not marked resolved',
       run = function()
         N.with_repo('repo_conflict', function()
