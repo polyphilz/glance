@@ -701,6 +701,131 @@ return {
       end,
     },
     {
+      name = 'merge accept-all and reset-result operate on the whole result buffer',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+
+          N.press('\\ao')
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), {
+            'intro',
+            'first main',
+            'gap one',
+            'gap two',
+            'gap three',
+            'second main',
+            'outro',
+          })
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '0 unresolved')
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), true)
+
+          N.with_confirm(1, function()
+            N.press('\\R')
+          end)
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), {
+            'intro',
+            'first base',
+            'gap one',
+            'gap two',
+            'gap three',
+            'second base',
+            'outro',
+          })
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '2 unresolved')
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), true)
+        end)
+      end,
+    },
+    {
+      name = 'complete merge stages the resolved file and returns to the filetree',
+      run = function()
+        N.with_repo('repo_conflict_two_files', function(repo)
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+
+          A.equal(#filetree.files.conflicts, 2)
+          local first = filetree.files.conflicts[1]
+          ui.open_file(first)
+
+          N.press('\\t')
+          N.press('\\c')
+
+          local changed = git.get_changed_files()
+          A.falsy(ui.diff_open)
+          A.equal(vim.api.nvim_get_current_win(), filetree.win)
+          A.equal(#changed.conflicts, 1)
+          A.equal(changed.conflicts[1].path, repo.files.second)
+          A.equal(#changed.staged, 1)
+          A.equal(changed.staged[1].path, first.path)
+          A.equal(repo:read(first.path), 'first feature\n')
+        end)
+      end,
+    },
+    {
+      name = 'complete merge refuses unresolved conflicts and manual edits that are not marked resolved',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+          local messages, restore_notify = N.capture_notifications()
+
+          ui.open_file(filetree.files.conflicts[1])
+          N.press('\\c')
+
+          local warned_unresolved = false
+          for _, entry in ipairs(messages) do
+            if entry.msg:find('unresolved conflict', 1, true) then
+              warned_unresolved = true
+              break
+            end
+          end
+
+          A.truthy(warned_unresolved)
+          A.truthy(ui.diff_open)
+          A.equal(#git.get_changed_files().conflicts, 1)
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { 'manual draft' })
+          vim.api.nvim_exec_autocmds('TextChanged', {
+            buffer = result_buf,
+            modeline = false,
+          })
+          N.press('\\c')
+
+          restore_notify()
+
+          local warned_manual = false
+          for _, entry in ipairs(messages) do
+            if entry.msg:find('mark 1 manual conflict resolved first', 1, true) then
+              warned_manual = true
+              break
+            end
+          end
+
+          A.truthy(warned_manual)
+          A.truthy(ui.diff_open)
+          A.equal(#git.get_changed_files().conflicts, 1)
+        end)
+      end,
+    },
+    {
       name = 'type-changed files open a metadata panel instead of a diff',
       run = function()
         N.with_repo('repo_type_change', function()

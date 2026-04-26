@@ -385,6 +385,27 @@ return {
       end,
     },
     {
+      name = 'continue operation key hands a resolved merge off to the commit editor',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local file = git.get_changed_files().conflicts[1]
+
+          repo:write(repo.files.tracked, 'feature\n')
+          assert(git.stage_merge_result(file))
+
+          require('glance').start()
+          local commit_editor = require('glance.commit_editor')
+          local filetree = require('glance.filetree')
+
+          vim.api.nvim_set_current_win(filetree.win)
+          N.press('\\C')
+
+          A.truthy(commit_editor.is_open())
+        end)
+      end,
+    },
+    {
       name = 'x submits the commit buffer without closing Glance',
       run = function()
         N.with_repo('repo_staged', function(repo)

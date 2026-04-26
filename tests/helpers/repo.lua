@@ -275,6 +275,31 @@ function scenarios.repo_conflict_multi(fixture)
   assert(not ok, 'expected multi-conflict fixture')
 end
 
+function scenarios.repo_conflict_two_files(fixture)
+  seed_committed_file(fixture, 'first.txt', 'first base\n', 'first')
+  fixture.files.second = 'second.txt'
+  fixture:write(fixture.files.second, 'second base\n')
+  fixture:stage(fixture.files.second)
+  fixture:git({ 'commit', '-m', 'Seed second conflict file' })
+  fixture.files.tracked = fixture.files.first
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.first, 'first feature\n')
+  fixture:write(fixture.files.second, 'second feature\n')
+  fixture:commit_all('Feature changes two files')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.first, 'first main\n')
+  fixture:write(fixture.files.second, 'second main\n')
+  fixture:commit_all('Main changes two files')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected two-file merge conflict fixture')
+end
+
 function scenarios.repo_conflict_noeol(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'base')
   local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))

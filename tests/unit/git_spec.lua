@@ -1260,6 +1260,90 @@ return {
       end,
     },
     {
+      name = 'stage_merge_result resolves an unmerged path into the index',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local file = git.get_changed_files().conflicts[1]
+
+          repo:write(repo.files.tracked, 'feature\n')
+          local ok, err = git.stage_merge_result(file)
+
+          A.truthy(ok, err)
+          local changed = git.get_changed_files()
+          A.same(changed.conflicts, {})
+          A.equal(#changed.staged, 1)
+          A.equal(changed.staged[1].path, repo.files.tracked)
+        end)
+      end,
+    },
+    {
+      name = 'commit supports resolved merge states even when the tree matches ours',
+      run = function()
+        N.with_repo('repo_conflict', function(repo)
+          local git = require('glance.git')
+          local file = git.get_changed_files().conflicts[1]
+
+          repo:write(repo.files.tracked, 'main\n')
+          assert(git.stage_merge_result(file))
+
+          local changed = git.get_changed_files()
+          A.same(changed.conflicts, {})
+          A.same(changed.staged, {})
+
+          local ok, err = git.can_commit(changed)
+          A.truthy(ok, err)
+
+          ok, err = git.commit('Merge while keeping ours', changed)
+          A.truthy(ok, err)
+          A.equal(git.get_operation_context().kind, nil)
+          A.equal(vim.trim(repo:git({ 'log', '-1', '--pretty=%s' })), 'Merge while keeping ours')
+        end)
+      end,
+    },
+    {
+      name = 'continue_operation completes a resolved rebase conflict without opening an editor',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+          local main_branch = vim.trim(repo:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+          repo:write(repo.files.tracked, 'base\n')
+          repo:commit_all('Normalize fixture')
+
+          repo:git({ 'checkout', '-b', 'topic' })
+          repo:write(repo.files.tracked, 'topic change\n')
+          repo:commit_all('Topic change')
+
+          repo:git({ 'checkout', main_branch })
+          repo:write(repo.files.tracked, 'main change\n')
+          repo:commit_all('Main change')
+
+          repo:git({ 'checkout', 'topic' })
+          local rebase_ok = pcall(function()
+            repo:git({ 'rebase', main_branch })
+          end)
+          A.falsy(rebase_ok)
+
+          local context = git.get_operation_context()
+          A.equal(context.kind, 'rebase')
+
+          local file = git.get_changed_files().conflicts[1]
+          repo:write(repo.files.tracked, 'topic change\n')
+          local ok, err = git.stage_merge_result(file)
+          A.truthy(ok, err)
+
+          ok, err = git.continue_operation(context)
+          A.truthy(ok, err)
+
+          local changed = git.get_changed_files()
+          A.same(changed.conflicts, {})
+          A.equal(git.get_operation_context().kind, nil)
+          A.equal(repo:read(repo.files.tracked), 'topic change\n')
+        end)
+      end,
+    },
+    {
       name = 'get_operation_context reports rebase conflict metadata from git sentinels',
       run = function()
         N.with_repo('repo_no_changes', function(repo)

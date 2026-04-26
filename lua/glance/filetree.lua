@@ -731,6 +731,23 @@ local function refresh_after_discard(active_file)
   end
 end
 
+local function operation_label(context)
+  local labels = {
+    merge = 'merge',
+    rebase = 'rebase',
+    cherry_pick = 'cherry-pick',
+    revert = 'revert',
+  }
+  return labels[context and context.kind] or 'operation'
+end
+
+local function notify_operation_continue_error(context, err)
+  vim.notify(
+    'glance: failed to continue ' .. operation_label(context) .. ': ' .. tostring(err),
+    vim.log.levels.ERROR
+  )
+end
+
 function M.discard_selected_file()
   local file = M.get_selected_file()
   if not file then
@@ -956,6 +973,55 @@ function M.open_commit_editor()
   })
 end
 
+function M.continue_operation()
+  local git = require('glance.git')
+  local context = git.get_operation_context()
+
+  if not context.kind then
+    vim.notify('glance: no merge operation is ready to continue', vim.log.levels.WARN)
+    return false
+  end
+
+  local snapshot = git.get_status_snapshot()
+  if #((snapshot.files or {}).conflicts or {}) > 0 then
+    vim.notify('glance: resolve all conflicts before continuing ' .. operation_label(context), vim.log.levels.WARN)
+    return false
+  end
+
+  if context.kind == 'merge' then
+    M.open_commit_editor()
+    return true
+  end
+
+  if not confirm_action('Continue ' .. operation_label(context) .. '?', 'Continue') then
+    return false
+  end
+
+  local ok, err = git.continue_operation(context)
+  if not ok then
+    notify_operation_continue_error(context, err)
+    M.refresh()
+    return false
+  end
+
+  M.refresh()
+
+  if #(M.files.conflicts or {}) > 0 then
+    vim.notify('glance: ' .. operation_label(context) .. ' stopped at new conflicts', vim.log.levels.WARN)
+    require('glance.ui').open_file(M.files.conflicts[1])
+    return true
+  end
+
+  local after_context = git.get_operation_context()
+  if after_context.kind then
+    vim.notify('glance: ' .. operation_label(context) .. ' is still in progress', vim.log.levels.INFO)
+  else
+    vim.notify('glance: ' .. operation_label(context) .. ' complete', vim.log.levels.INFO)
+  end
+
+  return true
+end
+
 function M.open_log_view()
   local log_view = require('glance.log_view')
   if log_view.is_open() then
@@ -970,6 +1036,7 @@ end
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
   local km = config.options.keymaps
+  local merge_km = config.options.merge.keymaps or {}
 
   vim.keymap.set('n', 'j', function() for _ = 1, vim.v.count1 do M.move_down() end end, opts)
   vim.keymap.set('n', 'k', function() for _ = 1, vim.v.count1 do M.move_up() end end, opts)
@@ -988,6 +1055,7 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.unstage_all, function() M.unstage_all() end, opts)
   vim.keymap.set('n', km.discard_file, function() M.discard_selected_file() end, opts)
   vim.keymap.set('n', km.discard_all, function() M.discard_all() end, opts)
+  vim.keymap.set('n', merge_km.continue_operation, function() M.continue_operation() end, opts)
   vim.keymap.set('n', km.open_file, function()
     local file = M.get_selected_file()
     if file then
