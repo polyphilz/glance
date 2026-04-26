@@ -16,6 +16,7 @@ M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snappi
 M.repo_head_oid = nil
 M.repo_snapshot_key = ''
 M.repo_status_output = ''
+M.operation_context = nil
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -212,10 +213,42 @@ local function snap_to_nearest_file(line, prefer_up)
   scan(line - 1, 1, -1)
 end
 
-local function add_legend(lines, highlights)
+local function operation_label(context)
+  local labels = {
+    merge = 'merge',
+    rebase = 'rebase',
+    cherry_pick = 'cherry-pick',
+    revert = 'revert',
+  }
+  return labels[context and context.kind] or 'operation'
+end
+
+local function operation_title(context)
+  local labels = {
+    merge = 'Merge',
+    rebase = 'Rebase',
+    cherry_pick = 'Cherry-pick',
+    revert = 'Revert',
+  }
+  return labels[context and context.kind] or 'Operation'
+end
+
+local function display_key(lhs)
+  if type(lhs) ~= 'string' then
+    return ''
+  end
+
+  return lhs:gsub('<Leader>', '\\'):gsub('<leader>', '\\')
+end
+
+local function add_legend(lines, highlights, operation_context)
   local km = config.options.keymaps
   local title = '  actions'
-  local commit_line = '  [' .. km.commit .. '] commit staged changes'
+  local commit_action = 'commit staged changes'
+  if operation_context and operation_context.kind == 'merge' then
+    commit_action = 'commit merge'
+  end
+  local commit_line = '  [' .. km.commit .. '] ' .. commit_action
   local log_line = '  [' .. km.log .. '] browse commit history'
   local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
   local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
@@ -240,6 +273,37 @@ local function add_legend(lines, highlights)
   add_legend_key_highlights(highlights, 4, discard_line)
   add_legend_key_highlights(highlights, 5, commit_line)
   add_legend_key_highlights(highlights, 6, log_line)
+end
+
+local function merge_ready_message()
+  local km = config.options.keymaps
+  return {
+    title = '  Merge ready to complete',
+    detail = '  Press ' .. display_key(km.commit) .. ' to commit the merge',
+  }
+end
+
+local function operation_ready_message(context)
+  if not context or not context.kind then
+    return nil
+  end
+
+  if context.kind == 'merge' then
+    return merge_ready_message()
+  end
+
+  local key = display_key(config.options.merge.keymaps.continue_operation)
+  local detail
+  if key ~= '' then
+    detail = '  Press ' .. key .. ' to continue'
+  else
+    detail = '  Continue the ' .. operation_label(context) .. ' from the filetree'
+  end
+
+  return {
+    title = '  ' .. operation_title(context) .. ' ready to continue',
+    detail = detail,
+  }
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -273,7 +337,8 @@ function M.create_buf()
 end
 
 --- Render the file list with section headers into the buffer.
-function M.render(files)
+function M.render(files, opts)
+  opts = opts or {}
   files = files or {}
   files = {
     conflicts = files.conflicts or {},
@@ -283,13 +348,14 @@ function M.render(files)
   }
 
   M.files = files
+  M.operation_context = opts.operation_context
   M.line_map = {}
   M.selected_line = nil
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
   if filetree_config().show_legend then
-    add_legend(lines, highlights)
+    add_legend(lines, highlights, opts.operation_context)
   end
 
   local function add_section(title, file_list)
@@ -330,8 +396,16 @@ function M.render(files)
 
   -- Handle empty state
   if #lines == legend_line_count() then
-    lines[#lines + 1] = '  No changes found'
-    add_highlight(highlights, #lines, 0, 20, 'Comment')
+    local ready = operation_ready_message(opts.operation_context)
+    if ready then
+      lines[#lines + 1] = ready.title
+      add_highlight(highlights, #lines, 0, #ready.title, 'GlanceSectionHeader')
+      lines[#lines + 1] = ready.detail
+      add_highlight(highlights, #lines, 0, #ready.detail, 'Comment')
+    else
+      lines[#lines + 1] = '  No changes found'
+      add_highlight(highlights, #lines, 0, 20, 'Comment')
+    end
   end
 
   -- Write to buffer
@@ -511,7 +585,10 @@ function M.apply_status_snapshot(snapshot)
   M.repo_head_oid = snapshot.head_oid
   M.repo_snapshot_key = snapshot.key or ''
   M.repo_status_output = snapshot.output or ''
-  M.render(snapshot.files)
+  local operation_context = snapshot.operation_context or require('glance.git').get_operation_context()
+  M.render(snapshot.files, {
+    operation_context = operation_context,
+  })
   restore_selection(saved_line)
 end
 
@@ -729,16 +806,6 @@ local function refresh_after_discard(active_file)
   if ui.diff_open and active_file then
     M.highlight_active(active_file)
   end
-end
-
-local function operation_label(context)
-  local labels = {
-    merge = 'merge',
-    rebase = 'rebase',
-    cherry_pick = 'cherry-pick',
-    revert = 'revert',
-  }
-  return labels[context and context.kind] or 'operation'
 end
 
 local function notify_operation_continue_error(context, err)

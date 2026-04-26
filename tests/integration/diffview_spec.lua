@@ -776,6 +776,42 @@ return {
       end,
     },
     {
+      name = 'accept all ours can complete a merge with no visible staged diff',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          require('glance').start()
+          local git = require('glance.git')
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local messages, restore_notify = N.capture_notifications()
+
+          ui.open_file(filetree.files.conflicts[1])
+          N.press('\\ao')
+          N.press('\\c')
+          restore_notify()
+
+          local changed = git.get_changed_files()
+          A.falsy(ui.diff_open)
+          A.equal(git.get_operation_context().kind, 'merge')
+          A.equal(#(changed.conflicts or {}), 0)
+          A.equal(#(changed.staged or {}), 0)
+          A.equal(#(changed.changes or {}), 0)
+          local lines = vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false)
+          A.equal(lines[#lines - 1], '  Merge ready to complete')
+          A.equal(lines[#lines], '  Press c to commit the merge')
+
+          local notified = false
+          for _, entry in ipairs(messages) do
+            if entry.msg == 'glance: all merge conflicts are resolved; press c to commit the merge' then
+              notified = true
+              break
+            end
+          end
+          A.truthy(notified)
+        end)
+      end,
+    },
+    {
       name = 'complete merge stages the resolved file and returns to the filetree',
       run = function()
         N.with_repo('repo_conflict_two_files', function(repo)

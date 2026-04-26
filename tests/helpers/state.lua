@@ -119,6 +119,7 @@ function M.reset()
     filetree.repo_head_oid = nil
     filetree.repo_snapshot_key = ''
     filetree.repo_status_output = ''
+    filetree.operation_context = nil
   end
 
   if commit_editor then

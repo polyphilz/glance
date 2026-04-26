@@ -203,7 +203,7 @@ local function notify_post_complete(context, files)
   end
 
   if context and context.kind == 'merge' then
-    vim.notify('glance: all merge conflicts are resolved; press c to commit staged changes', vim.log.levels.INFO)
+    vim.notify('glance: all merge conflicts are resolved; press c to commit the merge', vim.log.levels.INFO)
     return
   end
 

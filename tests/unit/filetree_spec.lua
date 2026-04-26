@@ -165,6 +165,34 @@ return {
       end,
     },
     {
+      name = 'render shows merge-ready state when a merge has no visible changes',
+      run = function()
+        local filetree = setup_filetree()
+        filetree.render({
+          conflicts = {},
+          staged = {},
+          changes = {},
+          untracked = {},
+        }, {
+          operation_context = { kind = 'merge' },
+        })
+
+        A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  [c] commit merge',
+          '  [L] browse commit history',
+          '',
+          '  Merge ready to complete',
+          '  Press c to commit the merge',
+        })
+        A.equal(filetree.get_selected_file(), nil)
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+      end,
+    },
+    {
       name = 'render restores cursorline when files return',
       run = function()
         local filetree = setup_filetree()
