@@ -1315,7 +1315,7 @@ return {
       end,
     },
     {
-      name = 'close cleans up every registered content pane in a custom workspace',
+      name = 'close preserves non-editable normal buffers in a custom workspace',
       run = function()
         N.with_repo('repo_modified', function()
           local diffview, wins, bufs = open_custom_workspace({
@@ -1330,6 +1330,9 @@ return {
           local filetree = require('glance.filetree')
           local ui = require('glance.ui')
 
+          vim.api.nvim_buf_set_lines(bufs.merge_theirs, 0, -1, false, { 'unsaved source draft' })
+          vim.api.nvim_buf_set_option(bufs.merge_ours, 'buftype', 'nofile')
+
           diffview.close(true)
 
           A.falsy(ui.diff_open)
@@ -1339,9 +1342,11 @@ return {
           for _, win in pairs(wins) do
             A.falsy(vim.api.nvim_win_is_valid(win))
           end
-          for _, buf in pairs(bufs) do
-            A.falsy(vim.api.nvim_buf_is_valid(buf))
-          end
+          A.truthy(vim.api.nvim_buf_is_valid(bufs.merge_theirs))
+          A.same(vim.api.nvim_buf_get_lines(bufs.merge_theirs, 0, -1, false), { 'unsaved source draft' })
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = bufs.merge_theirs }), true)
+          A.falsy(vim.api.nvim_buf_is_valid(bufs.merge_ours))
+          A.falsy(vim.api.nvim_buf_is_valid(bufs.merge_result))
         end)
       end,
     },

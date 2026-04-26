@@ -915,6 +915,27 @@ function M.reset_workspace()
   sync_filetree_pane()
 end
 
+local function workspace_buffer_delete_options(role, buf, discard_new_changes)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return nil
+  end
+
+  local buftype = vim.api.nvim_buf_get_option(buf, 'buftype')
+  if buftype == 'nofile' then
+    return { force = true }
+  end
+
+  if vim.fn.bufwinid(buf) ~= -1 then
+    return nil
+  end
+
+  if role == M.editable_role() then
+    return { force = discard_new_changes }
+  end
+
+  return nil
+end
+
 --- Clean up diff windows and buffers, return to file tree.
 --- @param force boolean|nil  If true, discard unsaved changes. Otherwise prompt.
 function M.close(force)
@@ -991,18 +1012,9 @@ function M.close(force)
         vim.api.nvim_win_close(win, true)
       end
 
-      if buf and vim.api.nvim_buf_is_valid(buf) then
-        if role == M.editable_role() then
-          local buftype = vim.api.nvim_buf_get_option(buf, 'buftype')
-          local visible_elsewhere = vim.fn.bufwinid(buf) ~= -1
-          if buftype == 'nofile' or not visible_elsewhere then
-            vim.api.nvim_buf_delete(buf, {
-              force = discard_new_changes or buftype == 'nofile',
-            })
-          end
-        else
-          vim.api.nvim_buf_delete(buf, { force = true })
-        end
+      local delete_opts = workspace_buffer_delete_options(role, buf, discard_new_changes)
+      if delete_opts then
+        vim.api.nvim_buf_delete(buf, delete_opts)
       end
     end
 
