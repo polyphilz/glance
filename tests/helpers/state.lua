@@ -47,6 +47,14 @@ function M.reset()
   local minimap = loaded['glance.minimap']
   local repo_sync = loaded['glance.repo_sync']
   local ui = loaded['glance.ui']
+  local workspace = loaded['glance.workspace']
+
+  local diff_wins = {}
+  local diff_bufs = {}
+  if diffview and diffview.workspace and workspace and workspace.collect_windows and workspace.collect_buffers then
+    diff_wins = workspace.collect_windows(diffview.workspace, { with_pane = true })
+    diff_bufs = workspace.collect_buffers(diffview.workspace, { with_pane = true })
+  end
 
   if diffview and diffview.stop_watching then
     pcall(diffview.stop_watching)
@@ -74,12 +82,18 @@ function M.reset()
 
   close_window(commit_editor and commit_editor.win)
   close_window(log_view and log_view.win)
+  for _, win in ipairs(diff_wins) do
+    close_window(win)
+  end
   delete_buffer(minimap and minimap.buf)
   delete_buffer(commit_editor and commit_editor.buf)
   delete_buffer(log_view and log_view.buf)
   delete_buffer(ui and ui.welcome_buf)
   delete_buffer(diffview and diffview.old_buf)
   delete_buffer(diffview and diffview.new_buf)
+  for _, buf in ipairs(diff_bufs) do
+    delete_buffer(buf)
+  end
   delete_buffer(filetree and filetree.buf)
 
   if diffview then

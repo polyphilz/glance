@@ -1260,6 +1260,103 @@ return {
       end,
     },
     {
+      name = 'get_operation_context reports rebase conflict metadata from git sentinels',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+          local main_branch = vim.trim(repo:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+          repo:write(repo.files.tracked, 'base\n')
+          repo:commit_all('Normalize fixture')
+
+          repo:git({ 'checkout', '-b', 'topic' })
+          repo:write(repo.files.tracked, 'topic change\n')
+          repo:commit_all('Topic change')
+
+          repo:git({ 'checkout', main_branch })
+          repo:write(repo.files.tracked, 'main change\n')
+          repo:commit_all('Main change')
+
+          repo:git({ 'checkout', 'topic' })
+
+          local ok = pcall(function()
+            repo:git({ 'rebase', main_branch })
+          end)
+          A.falsy(ok)
+
+          local context = git.get_operation_context()
+
+          A.equal(context.kind, 'rebase')
+          A.equal(context.prefix, 'Rebasing')
+          A.equal(context.ours_ref, 'HEAD')
+          A.truthy(type(context.theirs_display) == 'string' and context.theirs_display ~= '')
+        end)
+      end,
+    },
+    {
+      name = 'get_operation_context reports cherry-pick conflict metadata from git sentinels',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+          local main_branch = vim.trim(repo:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+          repo:write(repo.files.tracked, 'base\n')
+          repo:commit_all('Normalize fixture')
+
+          repo:git({ 'checkout', '-b', 'topic' })
+          repo:write(repo.files.tracked, 'topic change\n')
+          repo:commit_all('Topic change')
+          local topic_commit = vim.trim(repo:git({ 'rev-parse', 'HEAD' }))
+
+          repo:git({ 'checkout', main_branch })
+          repo:write(repo.files.tracked, 'main change\n')
+          repo:commit_all('Main change')
+
+          local ok = pcall(function()
+            repo:git({ 'cherry-pick', topic_commit })
+          end)
+          A.falsy(ok)
+
+          local context = git.get_operation_context()
+
+          A.equal(context.kind, 'cherry_pick')
+          A.equal(context.prefix, 'Cherry-picking')
+          A.equal(context.theirs_ref, 'CHERRY_PICK_HEAD')
+          A.contains(context.theirs_display, 'CHERRY_PICK_HEAD')
+        end)
+      end,
+    },
+    {
+      name = 'get_operation_context reports revert conflict metadata from git sentinels',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+
+          repo:write(repo.files.tracked, 'base\n')
+          repo:commit_all('Normalize fixture')
+
+          repo:write(repo.files.tracked, 'topic change\n')
+          repo:commit_all('Topic change')
+          local revert_target = vim.trim(repo:git({ 'rev-parse', 'HEAD' }))
+
+          repo:write(repo.files.tracked, 'main change\n')
+          repo:commit_all('Main change')
+
+          local ok = pcall(function()
+            repo:git({ 'revert', '--no-edit', revert_target })
+          end)
+          A.falsy(ok)
+
+          local context = git.get_operation_context()
+
+          A.equal(context.kind, 'revert')
+          A.equal(context.prefix, 'Reverting')
+          A.equal(context.theirs_ref, 'REVERT_HEAD')
+          A.contains(context.theirs_display, 'REVERT_HEAD')
+        end)
+      end,
+    },
+    {
       name = 'integration classifies type changes from git status',
       run = function()
         N.with_repo('repo_type_change', function(repo)
