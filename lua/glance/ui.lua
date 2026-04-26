@@ -88,11 +88,10 @@ local function hoverable_separator_windows()
   local diffview = require('glance.diffview')
   local wins = {}
 
-  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
-    wins[filetree.win] = true
-  end
-  if diffview.old_win and vim.api.nvim_win_is_valid(diffview.old_win) then
-    wins[diffview.old_win] = true
+  for _, win in ipairs(diffview.hoverable_separator_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      wins[win] = true
+    end
   end
 
   return wins

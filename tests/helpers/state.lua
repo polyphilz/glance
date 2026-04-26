@@ -87,6 +87,9 @@ function M.reset()
     diffview.old_win = nil
     diffview.new_buf = nil
     diffview.new_win = nil
+    if diffview.reset_workspace then
+      diffview.reset_workspace()
+    end
     diffview.fs_watcher = nil
     diffview.closing = false
   end
