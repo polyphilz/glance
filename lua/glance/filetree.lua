@@ -80,13 +80,6 @@ local function add_legend_key_highlights(highlights, line, text)
   end
 end
 
-local function legend_line_count()
-  if filetree_config().show_legend then
-    return 7
-  end
-  return 0
-end
-
 local function files_empty(files)
   files = files or {}
   return #(files.conflicts or {}) == 0
@@ -243,36 +236,44 @@ end
 
 local function add_legend(lines, highlights, operation_context)
   local km = config.options.keymaps
+  local merge_km = config.options.merge.keymaps or {}
   local title = '  actions'
   local commit_action = 'commit staged changes'
   if operation_context and operation_context.kind == 'merge' then
     commit_action = 'commit merge'
   end
   local commit_line = '  [' .. km.commit .. '] ' .. commit_action
+  local continue_line = nil
+  if operation_context and operation_context.kind and operation_context.kind ~= 'merge' then
+    local continue_key = display_key(merge_km.continue_operation)
+    if continue_key ~= '' then
+      continue_line = '  [' .. continue_key .. '] continue ' .. operation_label(operation_context)
+    end
+  end
   local log_line = '  [' .. km.log .. '] browse commit history'
-  local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
-  local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
-  local discard_line = '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all'
+  local action_lines = {
+    '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all',
+    '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all',
+    '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all',
+    commit_line,
+  }
+  if continue_line then
+    action_lines[#action_lines + 1] = continue_line
+  end
+  action_lines[#action_lines + 1] = log_line
 
   lines[#lines + 1] = title
-  lines[#lines + 1] = stage_line
-  lines[#lines + 1] = unstage_line
-  lines[#lines + 1] = discard_line
-  lines[#lines + 1] = commit_line
-  lines[#lines + 1] = log_line
+  for _, line in ipairs(action_lines) do
+    lines[#lines + 1] = line
+  end
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
-  add_highlight(highlights, 2, 0, #stage_line, 'GlanceLegendText')
-  add_highlight(highlights, 3, 0, #unstage_line, 'GlanceLegendText')
-  add_highlight(highlights, 4, 0, #discard_line, 'GlanceLegendText')
-  add_highlight(highlights, 5, 0, #commit_line, 'GlanceLegendText')
-  add_highlight(highlights, 6, 0, #log_line, 'GlanceLegendText')
-  add_legend_key_highlights(highlights, 2, stage_line)
-  add_legend_key_highlights(highlights, 3, unstage_line)
-  add_legend_key_highlights(highlights, 4, discard_line)
-  add_legend_key_highlights(highlights, 5, commit_line)
-  add_legend_key_highlights(highlights, 6, log_line)
+  for index, line in ipairs(action_lines) do
+    local line_number = index + 1
+    add_highlight(highlights, line_number, 0, #line, 'GlanceLegendText')
+    add_legend_key_highlights(highlights, line_number, line)
+  end
 end
 
 local function merge_ready_message()
@@ -357,6 +358,7 @@ function M.render(files, opts)
   if filetree_config().show_legend then
     add_legend(lines, highlights, opts.operation_context)
   end
+  local legend_lines = #lines
 
   local function add_section(title, file_list)
     if #file_list == 0 then
@@ -364,7 +366,7 @@ function M.render(files, opts)
     end
 
     -- Blank line before section (except at the very start)
-    if #lines > legend_line_count() then
+    if #lines > legend_lines then
       table.insert(lines, '')
       -- line_map entry is nil by default (no action needed)
     end
@@ -395,7 +397,7 @@ function M.render(files, opts)
   add_section('Untracked', files.untracked)
 
   -- Handle empty state
-  if #lines == legend_line_count() then
+  if #lines == legend_lines then
     local ready = operation_ready_message(opts.operation_context)
     if ready then
       lines[#lines + 1] = ready.title
@@ -710,8 +712,9 @@ function M.toggle()
   end
 end
 
-local function confirm_action(message, accept_label)
-  return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
+local function confirm_action(message, accept_label, cancel_label)
+  cancel_label = cancel_label or '&Cancel'
+  return vim.fn.confirm(message, '&' .. accept_label .. '\n' .. cancel_label, 2) == 1
 end
 
 local function active_diff_matches_file(file)
@@ -1060,7 +1063,7 @@ function M.continue_operation()
     return true
   end
 
-  if not confirm_action('Continue ' .. operation_label(context) .. '?', 'Continue') then
+  if not confirm_action('Continue ' .. operation_label(context) .. '?', 'Continue', 'Ca&ncel') then
     return false
   end
 
