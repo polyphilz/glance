@@ -659,10 +659,14 @@ function M.hoverable_separator_wins(diffview)
   return layout.hoverable_separator_wins(diffview)
 end
 
-local function rebuild(diffview, file)
-  local merge_model, err = model.build(file)
+local function rebuild(diffview, file, existing_model)
+  local merge_model = existing_model
   if not merge_model then
-    return nil, err
+    local err
+    merge_model, err = model.build(file)
+    if not merge_model then
+      return nil, err
+    end
   end
 
   state.file = file
@@ -697,7 +701,7 @@ function M.open(diffview, file)
     return
   end
 
-  rebuild(diffview, file)
+  rebuild(diffview, file, merge_model)
 
   local win = result_win(diffview)
   if win then

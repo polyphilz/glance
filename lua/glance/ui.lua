@@ -635,11 +635,24 @@ local function infer_kind(file)
   return 'unsupported'
 end
 
+local function with_redraw_suppressed(fn)
+  local old_lazyredraw = vim.o.lazyredraw
+  local ok, err = xpcall(function()
+    vim.o.lazyredraw = true
+    fn()
+  end, debug.traceback)
+
+  vim.o.lazyredraw = old_lazyredraw
+  if not ok then
+    error(err)
+  end
+  vim.cmd('redraw')
+end
+
 --- Open a file based on its classified git state.
 function M.open_file(file)
   local diffview = require('glance.diffview')
   local git = require('glance.git')
-  local is_binary = git.ensure_file_binary(file)
   local kind = infer_kind(file)
 
   -- Close any existing diff first
@@ -647,33 +660,37 @@ function M.open_file(file)
     diffview.close()
   end
 
-  -- Close welcome pane to make room for diff
-  M.close_welcome()
+  with_redraw_suppressed(function()
+    local is_binary = git.ensure_file_binary(file)
 
-  if is_binary then
-    diffview.open_binary(file)
-  elseif kind == 'deleted' then
-    diffview.open_deleted(file)
-  elseif kind == 'untracked' then
-    diffview.open_untracked(file)
-  elseif kind == 'added' and file.section ~= 'staged' then
-    diffview.open_untracked(file)
-  elseif kind == 'conflicted' then
-    diffview.open_conflict(file)
-  elseif kind == 'copied' then
-    diffview.open_copied(file)
-  elseif kind == 'type_changed' then
-    diffview.open_type_changed(file)
-  elseif kind == 'unsupported' then
-    diffview.open_placeholder(file)
-  else
-    diffview.open(file)
-  end
+    -- Close welcome pane to make room for diff
+    M.close_welcome()
 
-  M.diff_open = true
-  filetree.highlight_active(file)
-  filetree.note_repo_activity()
-  M.update_separator_hover()
+    if is_binary then
+      diffview.open_binary(file)
+    elseif kind == 'deleted' then
+      diffview.open_deleted(file)
+    elseif kind == 'untracked' then
+      diffview.open_untracked(file)
+    elseif kind == 'added' and file.section ~= 'staged' then
+      diffview.open_untracked(file)
+    elseif kind == 'conflicted' then
+      diffview.open_conflict(file)
+    elseif kind == 'copied' then
+      diffview.open_copied(file)
+    elseif kind == 'type_changed' then
+      diffview.open_type_changed(file)
+    elseif kind == 'unsupported' then
+      diffview.open_placeholder(file)
+    else
+      diffview.open(file)
+    end
+
+    M.diff_open = true
+    filetree.highlight_active(file)
+    filetree.note_repo_activity()
+    M.update_separator_hover()
+  end)
 end
 
 --- Close diff panes and restore the file tree + welcome pane.

@@ -179,6 +179,34 @@ return {
       end,
     },
     {
+      name = 'conflicted file open builds the merge model once',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local merge_model = require('glance.merge.model')
+          local original_build = merge_model.build
+          local calls = 0
+
+          merge_model.build = function(...)
+            calls = calls + 1
+            return original_build(...)
+          end
+
+          local ok, err = pcall(function()
+            ui.open_file(filetree.files.conflicts[1])
+          end)
+          merge_model.build = original_build
+          if not ok then
+            error(err)
+          end
+
+          A.equal(calls, 1)
+        end)
+      end,
+    },
+    {
       name = 'merge refresh preserves unsaved result edits',
       run = function()
         N.with_repo('repo_conflict', function()
