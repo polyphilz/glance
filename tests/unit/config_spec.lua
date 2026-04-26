@@ -79,6 +79,7 @@ return {
           },
           merge = {
             keymaps = {
+              show_help = '?',
               accept_ours = '<leader>o',
               accept_theirs = '<leader>t',
               accept_both_ours_then_theirs = '<leader>O',
@@ -163,6 +164,7 @@ return {
           },
           merge = {
             keymaps = {
+              show_help = 'g?',
               accept_ours = 'go',
             },
           },
@@ -195,6 +197,7 @@ return {
         A.equal(config.options.windows.filetree.cursorline, true)
         A.equal(config.options.filetree.show_legend, false)
         A.equal(config.options.log.max_commits, 75)
+        A.equal(config.options.merge.keymaps.show_help, 'g?')
         A.equal(config.options.merge.keymaps.accept_ours, 'go')
         A.equal(config.options.merge.keymaps.accept_theirs, '<leader>t')
         A.equal(config.options.merge.keymaps.accept_all_ours, '<leader>ao')

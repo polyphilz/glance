@@ -1,5 +1,5 @@
-local actions = require('glance.merge.actions')
 local config = require('glance.config')
+local help = require('glance.merge.help')
 local layout = require('glance.merge.layout')
 
 local M = {}
@@ -120,10 +120,21 @@ local function result_label(model, active_conflict_index)
     parts[#parts + 1] = 'inference fallback'
   end
 
+  local hints = {}
+  if model.unresolved_count == 0 then
+    local complete_hint = help.complete_hint()
+    if complete_hint ~= '' then
+      hints[#hints + 1] = complete_hint
+    end
+  end
+  local help_hint = help.winbar_hint()
+  if help_hint ~= '' then
+    hints[#hints + 1] = help_hint
+  end
+
   local label = table.concat(parts, ' | ')
-  local hint = conflict and actions.hint_text(conflict, config.options.merge.keymaps) or ''
-  if hint ~= '' then
-    return label .. '%=' .. hint .. action_bar_padding()
+  if #hints > 0 then
+    return label .. '%=' .. table.concat(hints, ' | ') .. action_bar_padding()
   end
   return label
 end

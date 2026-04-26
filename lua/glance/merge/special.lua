@@ -1,6 +1,7 @@
 local config = require('glance.config')
 local filetree = require('glance.filetree')
 local git = require('glance.git')
+local help = require('glance.merge.help')
 local layout = require('glance.merge.layout')
 local workspace = require('glance.workspace')
 
@@ -247,7 +248,12 @@ local function render(diffview)
     end
     parts[#parts + 1] = class_title(state.info.class)
     parts[#parts + 1] = selection_label(state.info, state.selection)
-    vim.api.nvim_set_option_value('winbar', table.concat(parts, ' | '), { win = win })
+    local label = table.concat(parts, ' | ')
+    local hint = help.winbar_hint()
+    if hint ~= '' then
+      label = label .. '%=' .. hint
+    end
+    vim.api.nvim_set_option_value('winbar', label, { win = win })
   end
 end
 
@@ -276,6 +282,16 @@ local function bind_keymaps(diffview)
   if km.complete_merge then
     vim.keymap.set('n', km.complete_merge, function()
       M.complete(diffview)
+    end, opts)
+  end
+  if km.show_help then
+    vim.keymap.set('n', km.show_help, function()
+      help.toggle({
+        kind = 'special',
+        info = state.info,
+        selection = state.selection,
+        context = git.get_operation_context(),
+      })
     end, opts)
   end
   if km.continue_operation then

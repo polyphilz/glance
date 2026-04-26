@@ -604,7 +604,7 @@ return {
       end,
     },
     {
-      name = 'merge action bar renders configured keys and accept ours resolves immediately',
+      name = 'merge result winbar points to dynamic action help and accept ours resolves immediately',
       run = function()
         N.with_repo('repo_conflict', function(repo)
           require('glance').start()
@@ -624,11 +624,20 @@ return {
           A.truthy(has_extmark_detail(marks, 'number_hl_group', 'GlanceConflictActiveNumber'))
           A.contains(winbar, '1/1')
           A.contains(winbar, 'unresolved')
-          A.contains(winbar, '\\o ours')
-          A.contains(winbar, '\\t theirs')
-          A.contains(winbar, '\\O both o/t')
-          A.contains(winbar, '\\T both t/o')
-          A.contains(winbar, '\\b base')
+          A.contains(winbar, '? actions')
+          A.falsy(winbar:find('\\o ours', 1, true))
+
+          N.press('?')
+          local help_buf = vim.api.nvim_get_current_buf()
+          local help_lines = table.concat(vim.api.nvim_buf_get_lines(help_buf, 0, -1, false), '\n')
+          A.contains(vim.api.nvim_buf_get_name(help_buf), 'glance://merge/actions')
+          A.contains(help_lines, 'Current conflict')
+          A.contains(help_lines, '[\\o] accept ours')
+          A.contains(help_lines, '[\\ao] accept all ours')
+          A.contains(help_lines, '[\\c] complete file - blocked: 1 unresolved')
+
+          N.press('?')
+          A.equal(vim.api.nvim_get_current_win(), result_win)
 
           N.press('\\o')
 
@@ -636,6 +645,8 @@ return {
           winbar = vim.api.nvim_get_option_value('winbar', { win = result_win })
           A.contains(winbar, 'handled: ours')
           A.contains(winbar, '0 unresolved')
+          A.contains(winbar, '\\c complete')
+          A.contains(winbar, '? actions')
 
           vim.api.nvim_buf_call(result_buf, function()
             vim.cmd('write')
@@ -861,6 +872,20 @@ return {
           A.equal(vim.api.nvim_get_option_value('readonly', { buf = panel_buf }), true)
           A.contains(table.concat(vim.api.nvim_buf_get_lines(panel_buf, 0, -1, false), '\n'), 'Binary Conflict')
           A.contains(vim.api.nvim_get_option_value('winbar', { win = panel_win }), 'no choice selected')
+          A.contains(vim.api.nvim_get_option_value('winbar', { win = panel_win }), '? actions')
+
+          N.press('?')
+          local help_buf = vim.api.nvim_get_current_buf()
+          local help_lines = table.concat(vim.api.nvim_buf_get_lines(help_buf, 0, -1, false), '\n')
+          A.contains(vim.api.nvim_buf_get_name(help_buf), 'glance://merge/actions')
+          A.contains(help_lines, 'Merge actions for this special conflict.')
+          A.contains(help_lines, 'Current conflict')
+          A.contains(help_lines, '[\\o] take Ours')
+          A.contains(help_lines, '[\\t] take Theirs')
+          A.contains(help_lines, '[\\c] complete file - blocked: choose ours or theirs first')
+
+          N.press('?')
+          A.equal(vim.api.nvim_get_current_win(), panel_win)
 
           N.press('\\c')
 

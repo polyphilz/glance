@@ -92,6 +92,7 @@ local ALLOWED_MERGE = {
 }
 
 local ALLOWED_MERGE_KEYMAPS = {
+  show_help = true,
   accept_ours = true,
   accept_theirs = true,
   accept_both_ours_then_theirs = true,
@@ -107,6 +108,7 @@ local ALLOWED_MERGE_KEYMAPS = {
 }
 
 local MERGE_KEYMAP_ORDER = {
+  'show_help',
   'accept_ours',
   'accept_theirs',
   'accept_both_ours_then_theirs',
@@ -260,6 +262,7 @@ local BASE_DEFAULTS = {
   },
   merge = {
     keymaps = {
+      show_help = '?',
       accept_ours = '<leader>o',
       accept_theirs = '<leader>t',
       accept_both_ours_then_theirs = '<leader>O',

@@ -2,6 +2,7 @@ local actions = require('glance.merge.actions')
 local config = require('glance.config')
 local filetree = require('glance.filetree')
 local git = require('glance.git')
+local help = require('glance.merge.help')
 local layout = require('glance.merge.layout')
 local model = require('glance.merge.model')
 local render = require('glance.merge.render')
@@ -474,6 +475,15 @@ local function write_result_if_modified(diffview)
 end
 
 local function handle_action_keymap(diffview, action)
+  if action == 'show_help' then
+    help.toggle({
+      kind = 'text',
+      model = state.model,
+      active_conflict_index = state.active_conflict_index,
+      context = state.model and state.model.operation or git.get_operation_context(),
+    })
+    return
+  end
   if action == 'accept_all_ours' then
     apply_all(diffview, 'accept_ours')
     return
@@ -847,6 +857,7 @@ function M.reset()
   state.active_conflict_index = nil
   state.write_in_progress = false
   state.sync_in_progress = false
+  help.close()
   special.reset()
 end
 
