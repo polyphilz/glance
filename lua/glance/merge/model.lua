@@ -7,6 +7,8 @@ local function split_text(text)
     return {}, false
   end
 
+  text = text:gsub('\r\n', '\n')
+
   local lines = {}
   for line in (text .. '\n'):gmatch('(.-)\n') do
     lines[#lines + 1] = line

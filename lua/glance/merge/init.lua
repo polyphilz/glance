@@ -163,12 +163,6 @@ local function focus_result(diffview)
   return true
 end
 
-local function write_text(path, text)
-  local file = assert(io.open(path, 'w'))
-  file:write(text or '')
-  file:close()
-end
-
 local function confirm_action(message, accept_label)
   return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
 end
@@ -281,6 +275,43 @@ local function edit_result_buffer(diffview, file)
   return buf
 end
 
+local function set_buffer_lines_for_write(buf, lines, ends_with_newline)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or {})
+  vim.api.nvim_set_option_value('endofline', ends_with_newline ~= false, { buf = buf })
+end
+
+local function write_prepared_result(buf, prepared, visible_lines, visible_ends_with_newline)
+  local persisted_ends_with_newline = prepared.model and prepared.model.current_ends_with_newline
+  local previous_fixendofline = vim.api.nvim_get_option_value('fixendofline', { buf = buf })
+
+  state.sync_in_progress = true
+  local ok, err = xpcall(function()
+    set_buffer_lines_for_write(buf, prepared.persisted_lines, persisted_ends_with_newline)
+    if persisted_ends_with_newline == false then
+      vim.api.nvim_set_option_value('fixendofline', false, { buf = buf })
+    end
+
+    vim.api.nvim_buf_call(buf, function()
+      vim.cmd('silent noautocmd write')
+    end)
+  end, debug.traceback)
+
+  local restore_ok, restore_err = pcall(function()
+    vim.api.nvim_set_option_value('fixendofline', previous_fixendofline, { buf = buf })
+    set_buffer_lines_for_write(buf, visible_lines, visible_ends_with_newline)
+    vim.api.nvim_set_option_value('modified', not ok, { buf = buf })
+  end)
+  state.sync_in_progress = false
+
+  if not ok then
+    return false, err
+  end
+  if not restore_ok then
+    return false, restore_err
+  end
+  return true
+end
+
 local function bind_write_command(diffview, file)
   local buf = result_buf(diffview)
   if not buf then
@@ -295,15 +326,15 @@ local function bind_write_command(diffview, file)
         return
       end
 
-      local root = git.repo_root()
-      if not root then
+      if not git.repo_root() then
         vim.notify('glance: not inside a git repository', vim.log.levels.WARN)
         return
       end
 
       local current_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local current_ends_with_newline = vim.api.nvim_get_option_value('endofline', { buf = buf })
       local prepared, err = model.prepare_write(file, current_lines, {
-        current_ends_with_newline = vim.api.nvim_get_option_value('endofline', { buf = buf }),
+        current_ends_with_newline = current_ends_with_newline,
         previous_model = state.model,
       })
       if not prepared then
@@ -313,8 +344,10 @@ local function bind_write_command(diffview, file)
 
       state.write_in_progress = true
       local ok, write_err = xpcall(function()
-        write_text(root .. '/' .. file.path, prepared.persisted_text)
-        vim.api.nvim_set_option_value('modified', false, { buf = buf })
+        local wrote, write_result_err = write_prepared_result(buf, prepared, current_lines, current_ends_with_newline)
+        if not wrote then
+          error(write_result_err)
+        end
         filetree.note_repo_activity()
         M.refresh(diffview, file)
       end, debug.traceback)

@@ -422,6 +422,58 @@ return {
       end,
     },
     {
+      name = 'merge writes persisted conflict text through buffer write options',
+      run = function()
+        N.with_repo('repo_conflict_multi', function(repo)
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+          local expected_result = {
+            'intro updated',
+            'first main',
+            'gap one adjusted',
+            'gap two',
+            'gap three',
+            'second base',
+            'outro updated',
+          }
+          local expected_lf = table.concat({
+            'intro updated',
+            'first main',
+            'gap one adjusted',
+            'gap two',
+            'gap three',
+            '<<<<<<< Ours',
+            'second main',
+            '||||||| Base',
+            'second base',
+            '=======',
+            'second feature',
+            '>>>>>>> Theirs',
+            'outro updated',
+            '',
+          }, '\n')
+
+          vim.api.nvim_set_option_value('fileformat', 'dos', { buf = result_buf })
+          N.press('\\o')
+          vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, expected_result)
+          vim.api.nvim_buf_call(result_buf, function()
+            vim.cmd('write')
+          end)
+
+          A.same(vim.api.nvim_buf_get_lines(result_buf, 0, -1, false), expected_result)
+          A.equal(vim.api.nvim_get_option_value('modified', { buf = result_buf }), false)
+          A.equal(repo:read(repo.files.tracked), expected_lf:gsub('\n', '\r\n'))
+        end)
+      end,
+    },
+    {
       name = 'merge writes persist a fully resolved clean result without conflict markers',
       run = function()
         N.with_repo('repo_conflict', function(repo)
