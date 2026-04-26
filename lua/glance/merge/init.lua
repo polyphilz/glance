@@ -11,6 +11,8 @@ local workspace = require('glance.workspace')
 
 local M = {}
 
+local RESULT_SYNC_DEBOUNCE_MS = 120
+
 local state = {
   active = false,
   file = nil,
@@ -18,6 +20,8 @@ local state = {
   active_conflict_index = nil,
   write_in_progress = false,
   sync_in_progress = false,
+  result_sync_pending = false,
+  result_sync_token = 0,
 }
 
 local function panes(diffview)
@@ -390,6 +394,64 @@ local function sync_from_result_buffer(diffview, file, previous_model)
   return merge_model
 end
 
+local function cancel_result_sync()
+  state.result_sync_token = state.result_sync_token + 1
+  state.result_sync_pending = false
+end
+
+local function run_result_sync(diffview, file)
+  if state.write_in_progress or state.sync_in_progress then
+    return true
+  end
+  if not state.active or not file or not state.file or state.file.path ~= file.path then
+    return true
+  end
+
+  local previous_model = state.model
+  local merge_model, err = sync_from_result_buffer(diffview, file, previous_model)
+  if not merge_model then
+    state.model = previous_model
+    return false, err
+  end
+
+  return true
+end
+
+local function schedule_result_sync(diffview, file)
+  state.result_sync_token = state.result_sync_token + 1
+  state.result_sync_pending = true
+  local token = state.result_sync_token
+
+  vim.defer_fn(function()
+    if token ~= state.result_sync_token or not state.result_sync_pending then
+      return
+    end
+
+    state.result_sync_pending = false
+    run_result_sync(diffview, file)
+  end, RESULT_SYNC_DEBOUNCE_MS)
+end
+
+local function flush_result_sync(diffview)
+  if not state.result_sync_pending then
+    return true
+  end
+
+  local file = state.file
+  cancel_result_sync()
+  return run_result_sync(diffview, file)
+end
+
+local function flush_result_sync_or_notify(diffview)
+  local synced, sync_err = flush_result_sync(diffview)
+  if not synced then
+    vim.notify('glance: failed to refresh merge state: ' .. tostring(sync_err), vim.log.levels.WARN)
+    return false
+  end
+
+  return true
+end
+
 local function apply_action(diffview, action)
   local buf = result_buf(diffview)
   if not buf then
@@ -508,6 +570,10 @@ local function write_result_if_modified(diffview)
 end
 
 local function handle_action_keymap(diffview, action)
+  if not flush_result_sync_or_notify(diffview) then
+    return
+  end
+
   if action == 'show_help' then
     help.toggle({
       kind = 'text',
@@ -592,11 +658,7 @@ local function bind_result_tracking(diffview, file)
         return
       end
 
-      local previous_model = state.model
-      local merge_model = sync_from_result_buffer(diffview, file, previous_model)
-      if not merge_model then
-        state.model = previous_model
-      end
+      schedule_result_sync(diffview, file)
     end,
   })
 
@@ -643,6 +705,10 @@ function M.jump_to_conflict(diffview, index)
 end
 
 function M.jump_next(diffview)
+  if not flush_result_sync_or_notify(diffview) then
+    return false
+  end
+
   local unresolved = unresolved_indices()
   if #unresolved == 0 then
     return false
@@ -665,6 +731,10 @@ function M.jump_next(diffview)
 end
 
 function M.jump_prev(diffview)
+  if not flush_result_sync_or_notify(diffview) then
+    return false
+  end
+
   local unresolved = unresolved_indices()
   if #unresolved == 0 then
     return false
@@ -730,6 +800,8 @@ local function rebuild(diffview, file, existing_model)
 end
 
 function M.open(diffview, file)
+  cancel_result_sync()
+
   local info = git.get_conflict_info(file)
   if special.open(diffview, file, info) then
     state.active = false
@@ -884,12 +956,14 @@ function M.complete(diffview)
 end
 
 function M.reset()
+  cancel_result_sync()
   state.active = false
   state.file = nil
   state.model = nil
   state.active_conflict_index = nil
   state.write_in_progress = false
   state.sync_in_progress = false
+  state.result_sync_pending = false
   help.close()
   special.reset()
 end

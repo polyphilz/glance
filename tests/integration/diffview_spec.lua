@@ -13,6 +13,13 @@ local function merge_extmarks(buf)
   return vim.api.nvim_buf_get_extmarks(buf, merge_ns, 0, -1, { details = true })
 end
 
+local function trigger_text_changed(buf)
+  vim.api.nvim_exec_autocmds('TextChanged', {
+    buffer = buf,
+    modeline = false,
+  })
+end
+
 local function has_extmark_detail(marks, key, value)
   for _, mark in ipairs(marks) do
     local details = mark[4]
@@ -207,6 +214,47 @@ return {
       end,
     },
     {
+      name = 'merge result edits debounce model rebuilds',
+      run = function()
+        N.with_repo('repo_conflict', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local merge_model = require('glance.merge.model')
+          local workspace = require('glance.workspace')
+
+          ui.open_file(filetree.files.conflicts[1])
+
+          local original_build = merge_model.build
+          local calls = 0
+          merge_model.build = function(...)
+            calls = calls + 1
+            return original_build(...)
+          end
+
+          local ok, err = xpcall(function()
+            local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+            for _, text in ipairs({ 'manual draft 1', 'manual draft 2', 'manual draft 3' }) do
+              vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { text })
+              trigger_text_changed(result_buf)
+            end
+
+            A.equal(calls, 0)
+            N.wait(500, function()
+              return calls == 1
+            end, 'debounced merge sync did not run once')
+            A.equal(calls, 1)
+          end, debug.traceback)
+
+          merge_model.build = original_build
+          if not ok then
+            error(err, 0)
+          end
+        end)
+      end,
+    },
+    {
       name = 'merge refresh preserves unsaved result edits',
       run = function()
         N.with_repo('repo_conflict', function()
@@ -304,11 +352,11 @@ return {
           A.equal(vim.api.nvim_win_get_cursor(result_win)[1], 2)
 
           vim.api.nvim_buf_set_lines(result_buf, 1, 1, false, { 'draft insert' })
-          vim.api.nvim_exec_autocmds('TextChanged', {
-            buffer = result_buf,
-            modeline = false,
-          })
+          trigger_text_changed(result_buf)
 
+          N.wait(500, function()
+            return vim.api.nvim_get_option_value('winbar', { win = result_win }):find('manual unresolved', 1, true) ~= nil
+          end, 'merge result did not sync manual zero-line edit')
           A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), 'manual unresolved')
           A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '1 unresolved')
 
@@ -637,10 +685,12 @@ return {
 
           local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
           vim.api.nvim_buf_set_lines(result_buf, 1, 2, false, { 'manual first resolution' })
-          vim.api.nvim_exec_autocmds('TextChanged', {
-            buffer = result_buf,
-            modeline = false,
-          })
+          trigger_text_changed(result_buf)
+
+          N.wait(500, function()
+            local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+            return vim.api.nvim_get_option_value('winbar', { win = result_win }):find('manual unresolved', 1, true) ~= nil
+          end, 'merge minimap did not sync manual state')
 
           N.press(']x')
           A.contains(minimap.cached_pixels, logic.states.MERGE_MANUAL)
@@ -762,11 +812,11 @@ return {
           local result_win = workspace.get_win(diffview.workspace, 'merge_result')
 
           vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { 'custom merge draft' })
-          vim.api.nvim_exec_autocmds('TextChanged', {
-            buffer = result_buf,
-            modeline = false,
-          })
+          trigger_text_changed(result_buf)
 
+          N.wait(500, function()
+            return vim.api.nvim_get_option_value('winbar', { win = result_win }):find('manual unresolved', 1, true) ~= nil
+          end, 'merge result did not sync manual edit')
           A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '1 unresolved')
 
           N.press('\\m')
@@ -1078,10 +1128,7 @@ return {
 
           local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
           vim.api.nvim_buf_set_lines(result_buf, 0, -1, false, { 'manual draft' })
-          vim.api.nvim_exec_autocmds('TextChanged', {
-            buffer = result_buf,
-            modeline = false,
-          })
+          trigger_text_changed(result_buf)
           N.press('\\c')
 
           restore_notify()
