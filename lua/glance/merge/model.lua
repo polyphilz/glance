@@ -1130,28 +1130,16 @@ function M.apply_action(merge_model, index, action)
   if action == 'accept_ours' or action == 'accept_theirs' then
     local side = action == 'accept_ours' and 'ours' or 'theirs'
     conflict.state = side == 'ours' and 'ours' or 'theirs'
-    if side == 'ours' then
-      conflict.ours_handled = true
-    else
-      conflict.theirs_handled = true
-    end
+    conflict.ours_handled = true
+    conflict.theirs_handled = true
     finalize_conflict_action(conflict)
     return conflict
   end
 
-  if action == 'ignore_ours' or action == 'ignore_theirs' then
-    if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
-      return nil, 'ignore actions are not available for manual merge states'
-    end
-
-    if conflict.state == 'unresolved' then
-      conflict.state = 'base_only'
-    end
-    if action == 'ignore_ours' then
-      conflict.ours_handled = true
-    else
-      conflict.theirs_handled = true
-    end
+  if action == 'keep_base' then
+    conflict.state = 'base_only'
+    conflict.ours_handled = true
+    conflict.theirs_handled = true
     finalize_conflict_action(conflict)
     return conflict
   end

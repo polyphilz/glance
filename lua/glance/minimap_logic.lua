@@ -6,6 +6,10 @@ M.states = {
   DELETE = 2,
   CHANGE = 3,
   CURSOR = 4,
+  MERGE_UNRESOLVED = 5,
+  MERGE_HANDLED = 6,
+  MERGE_MANUAL = 7,
+  MERGE_ACTIVE = 8,
 }
 
 --- Extract diff regions from old_lines vs new_lines using vim.diff().
@@ -47,6 +51,49 @@ function M.compute_line_types(old_lines, new_lines)
   end
 
   return line_types, total
+end
+
+local function conflict_state(conflict, is_active)
+  if is_active then
+    return M.states.MERGE_ACTIVE
+  end
+  if conflict.state == 'manual_unresolved' then
+    return M.states.MERGE_MANUAL
+  end
+  if conflict.handled then
+    return M.states.MERGE_HANDLED
+  end
+  return M.states.MERGE_UNRESOLVED
+end
+
+--- Convert merge conflict result ranges into minimap line states.
+--- Zero-line conflicts are anchored to their insertion line so they remain visible.
+--- @param conflicts table[]
+--- @param total_lines integer
+--- @param active_conflict_index integer|nil
+--- @return table, integer
+function M.compute_merge_line_types(conflicts, total_lines, active_conflict_index)
+  total_lines = math.max(total_lines or 0, 1)
+  local line_types = {}
+
+  for index, conflict in ipairs(conflicts or {}) do
+    local range = conflict.result_range or {}
+    local start_line = range.start or 1
+    local count = range.count or 0
+    local state = conflict_state(conflict, index == active_conflict_index)
+
+    if count == 0 then
+      local mark = math.max(1, math.min(start_line, total_lines))
+      line_types[mark] = state
+    else
+      local stop_line = math.min(start_line + count - 1, total_lines)
+      for lnum = math.max(start_line, 1), stop_line do
+        line_types[lnum] = state
+      end
+    end
+  end
+
+  return line_types, total_lines
 end
 
 --- Downsample line_types into pixel_count logical pixels.

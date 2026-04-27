@@ -41,6 +41,7 @@ local function refresh_decorations(diffview)
   end
 
   render.decorate(panes(diffview), state.model, state.active_conflict_index)
+  require('glance.minimap').update_merge(state.model, state.active_conflict_index)
 end
 
 local function result_win(diffview)
@@ -464,6 +465,7 @@ local function rebuild(diffview, file)
     active_conflict_index = state.active_conflict_index,
   })
   layout.equalize(diffview)
+  require('glance.minimap').update_merge(state.model, state.active_conflict_index)
   return merge_model
 end
 
@@ -490,6 +492,11 @@ function M.open(diffview, file)
   end
 
   rebuild(diffview, file)
+
+  local win = result_win(diffview)
+  if win then
+    require('glance.minimap').open_merge(win, state.model, state.active_conflict_index)
+  end
 
   local root = git.repo_root()
   if root and config.options.watch.enabled then

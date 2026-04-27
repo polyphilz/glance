@@ -58,5 +58,50 @@ return {
         A.equal(logic.cursor_pixel(10, 10, 0), nil)
       end,
     },
+    {
+      name = 'compute merge line types maps conflict states and zero-line ranges',
+      run = function()
+        local logic = require('glance.minimap_logic')
+        local line_types = logic.compute_merge_line_types({
+          {
+            state = 'unresolved',
+            handled = false,
+            result_range = { start = 2, count = 0 },
+          },
+          {
+            state = 'ours',
+            handled = true,
+            result_range = { start = 5, count = 2 },
+          },
+          {
+            state = 'manual_unresolved',
+            handled = false,
+            result_range = { start = 10, count = 1 },
+          },
+          {
+            state = 'manual_resolved',
+            handled = true,
+            result_range = { start = 12, count = 1 },
+          },
+        }, 12)
+
+        A.equal(line_types[2], logic.states.MERGE_UNRESOLVED)
+        A.equal(line_types[5], logic.states.MERGE_HANDLED)
+        A.equal(line_types[6], logic.states.MERGE_HANDLED)
+        A.equal(line_types[10], logic.states.MERGE_MANUAL)
+        A.equal(line_types[12], logic.states.MERGE_HANDLED)
+
+        local active_types = logic.compute_merge_line_types({
+          {
+            state = 'unresolved',
+            handled = false,
+            result_range = { start = 3, count = 2 },
+          },
+        }, 8, 1)
+
+        A.equal(active_types[3], logic.states.MERGE_ACTIVE)
+        A.equal(active_types[4], logic.states.MERGE_ACTIVE)
+      end,
+    },
   },
 }
