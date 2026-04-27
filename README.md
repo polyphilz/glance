@@ -242,6 +242,7 @@ Available top-level config domains:
 - `windows`
 - `filetree`
 - `log`
+- `merge`
 - `keymaps`
 - `pane_navigation`
 - `hunk_navigation`
@@ -261,6 +262,7 @@ Notes:
 - `theme.preset` selects a built-in palette, and `theme.palette` can override individual colors on top of that preset.
 - `welcome.animate` controls whether the welcome screen animation runs.
 - `watch.enabled` keeps `.git` metadata watchers on. `watch.poll` controls background worktree polling for new untracked/external file changes.
+- `merge.keymaps.show_help` controls the merge actions help key. It defaults to `?`.
 - Discard actions always prompt for confirmation before changing the repo state.
 
 </details>
