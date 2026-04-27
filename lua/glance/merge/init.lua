@@ -93,6 +93,21 @@ local function first_unresolved_index()
   return unresolved[1]
 end
 
+local function manual_unresolved_count()
+  local count = 0
+  if not state.model then
+    return count
+  end
+
+  for _, conflict in ipairs(state.model.conflicts) do
+    if conflict.state == 'manual_unresolved' then
+      count = count + 1
+    end
+  end
+
+  return count
+end
+
 local function conflict_index_for_result_line(line)
   if not state.model then
     return nil
@@ -150,6 +165,90 @@ local function write_text(path, text)
   local file = assert(io.open(path, 'w'))
   file:write(text or '')
   file:close()
+end
+
+local function confirm_action(message, accept_label)
+  return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
+end
+
+local function display_key(lhs)
+  if type(lhs) ~= 'string' then
+    return ''
+  end
+
+  return lhs:gsub('<Leader>', '\\'):gsub('<leader>', '\\')
+end
+
+local function operation_label(context)
+  local labels = {
+    merge = 'merge',
+    rebase = 'rebase',
+    cherry_pick = 'cherry-pick',
+    revert = 'revert',
+  }
+  return labels[context and context.kind] or 'operation'
+end
+
+local function notify_post_complete(context, files)
+  files = files or {}
+  local conflicts = files.conflicts or {}
+  if #conflicts > 0 then
+    local noun = #conflicts == 1 and 'file' or 'files'
+    local verb = #conflicts == 1 and 'remains' or 'remain'
+    vim.notify(
+      string.format('glance: merge result staged; %d conflicted %s %s', #conflicts, noun, verb),
+      vim.log.levels.INFO
+    )
+    return
+  end
+
+  if context and context.kind == 'merge' then
+    vim.notify('glance: all merge conflicts are resolved; press c to commit the merge', vim.log.levels.INFO)
+    return
+  end
+
+  if context and context.kind then
+    local key = display_key(config.options.merge.keymaps.continue_operation)
+    if key ~= '' then
+      vim.notify(
+        string.format('glance: all %s conflicts are resolved; press %s to continue', operation_label(context), key),
+        vim.log.levels.INFO
+      )
+    else
+      vim.notify(
+        string.format('glance: all %s conflicts are resolved; continue the Git operation from the filetree', operation_label(context)),
+        vim.log.levels.INFO
+      )
+    end
+    return
+  end
+
+  vim.notify('glance: merge result staged', vim.log.levels.INFO)
+end
+
+local function set_result_from_model(diffview, merge_model, opts)
+  opts = opts or {}
+  local buf = result_buf(diffview)
+  if not buf then
+    return false
+  end
+
+  state.sync_in_progress = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, merge_model.result_lines or {})
+  vim.api.nvim_set_option_value('endofline', merge_model.result_ends_with_newline ~= false, { buf = buf })
+  if opts.modified ~= nil then
+    vim.api.nvim_set_option_value('modified', opts.modified, { buf = buf })
+  end
+  state.sync_in_progress = false
+
+  state.model = merge_model
+  render.apply(diffview, panes(diffview), merge_model, state.file, {
+    refresh_sources = false,
+    refresh_result = false,
+    active_conflict_index = state.active_conflict_index,
+  })
+  refresh_decorations(diffview)
+  return true
 end
 
 local function edit_result_buffer(diffview, file)
@@ -291,6 +390,113 @@ local function apply_action(diffview, action)
   return true
 end
 
+local function apply_all(diffview, action)
+  if not state.model then
+    return false
+  end
+
+  local applied, err = actions.apply_all(state.model, action)
+  if not applied then
+    vim.notify('glance: failed to apply merge action: ' .. tostring(err), vim.log.levels.WARN)
+    return false
+  end
+
+  if not set_result_from_model(diffview, applied.model, { modified = true }) then
+    return false
+  end
+
+  vim.notify(
+    string.format('glance: applied %d conflict%s, skipped %d', applied.applied, applied.applied == 1 and '' or 's', applied.skipped),
+    vim.log.levels.INFO
+  )
+
+  local first = first_unresolved_index()
+  if first then
+    M.jump_to_conflict(diffview, first)
+  else
+    focus_result(diffview)
+  end
+  return true
+end
+
+local function reset_result(diffview)
+  if not state.file then
+    return false
+  end
+
+  if not confirm_action('Reset merge result for ' .. state.file.path .. '?', 'Reset') then
+    return false
+  end
+
+  local reset_model, err = model.reset_result(state.file)
+  if not reset_model then
+    vim.notify('glance: failed to reset merge result: ' .. tostring(err), vim.log.levels.WARN)
+    return false
+  end
+
+  state.active_conflict_index = nil
+  if not set_result_from_model(diffview, reset_model, { modified = true }) then
+    return false
+  end
+
+  local first = first_unresolved_index() or 1
+  if not M.jump_to_conflict(diffview, first) then
+    focus_result(diffview)
+  end
+  return true
+end
+
+local function write_result_if_modified(diffview)
+  local buf = result_buf(diffview)
+  if not buf then
+    return false, 'merge result buffer is not available'
+  end
+
+  if not result_modified(diffview) then
+    return true
+  end
+
+  local ok, err = xpcall(function()
+    vim.api.nvim_buf_call(buf, function()
+      vim.cmd('write')
+    end)
+  end, debug.traceback)
+  if not ok then
+    return false, tostring(err)
+  end
+
+  if vim.api.nvim_get_option_value('modified', { buf = buf }) then
+    return false, 'merge result still has unsaved changes'
+  end
+
+  return true
+end
+
+local function handle_action_keymap(diffview, action)
+  if action == 'accept_all_ours' then
+    apply_all(diffview, 'accept_ours')
+    return
+  end
+  if action == 'accept_all_theirs' then
+    apply_all(diffview, 'accept_theirs')
+    return
+  end
+  if action == 'reset_result' then
+    reset_result(diffview)
+    return
+  end
+  if action == 'complete_merge' then
+    M.complete(diffview)
+    return
+  end
+  if action == 'continue_operation' then
+    filetree.continue_operation()
+    return
+  end
+
+  apply_action(diffview, action)
+end
+
 local function bind_navigation_keymaps(diffview)
   for _, role in ipairs({ layout.THEIRS_ROLE, layout.OURS_ROLE, layout.RESULT_ROLE }) do
     local buf = workspace.get_buf(diffview.workspace, role)
@@ -318,7 +524,7 @@ local function bind_action_keymaps(diffview)
     if buf and vim.api.nvim_buf_is_valid(buf) then
       for action, lhs in pairs(keymaps) do
         vim.keymap.set('n', lhs, function()
-          apply_action(diffview, action)
+          handle_action_keymap(diffview, action)
         end, {
           buffer = buf,
           silent = true,
@@ -453,10 +659,14 @@ function M.hoverable_separator_wins(diffview)
   return layout.hoverable_separator_wins(diffview)
 end
 
-local function rebuild(diffview, file)
-  local merge_model, err = model.build(file)
+local function rebuild(diffview, file, existing_model)
+  local merge_model = existing_model
   if not merge_model then
-    return nil, err
+    local err
+    merge_model, err = model.build(file)
+    if not merge_model then
+      return nil, err
+    end
   end
 
   state.file = file
@@ -491,7 +701,7 @@ function M.open(diffview, file)
     return
   end
 
-  rebuild(diffview, file)
+  rebuild(diffview, file, merge_model)
 
   local win = result_win(diffview)
   if win then
@@ -547,6 +757,62 @@ function M.refresh(diffview, file)
   if not M.jump_to_conflict(diffview, first) then
     focus_result(diffview)
   end
+  return true
+end
+
+function M.complete(diffview)
+  if not state.active or not state.file then
+    return false
+  end
+
+  local wrote, write_err = write_result_if_modified(diffview)
+  if not wrote then
+    local manual_count = manual_unresolved_count()
+    if manual_count > 0 then
+      vim.notify(
+        string.format('glance: cannot complete merge; mark %d manual conflict%s resolved first', manual_count, manual_count == 1 and '' or 's'),
+        vim.log.levels.WARN
+      )
+    else
+      vim.notify('glance: failed to complete merge: ' .. tostring(write_err), vim.log.levels.WARN)
+    end
+    return false
+  end
+
+  local merge_model, sync_err = sync_from_result_buffer(diffview, state.file, state.model)
+  if not merge_model then
+    vim.notify('glance: failed to complete merge: ' .. tostring(sync_err), vim.log.levels.WARN)
+    return false
+  end
+
+  if merge_model.unresolved_count > 0 then
+    local manual_count = manual_unresolved_count()
+    if manual_count > 0 then
+      vim.notify(
+        string.format('glance: cannot complete merge; mark %d manual conflict%s resolved first', manual_count, manual_count == 1 and '' or 's'),
+        vim.log.levels.WARN
+      )
+    else
+      vim.notify(
+        string.format('glance: cannot complete merge; %d unresolved conflict%s remain', merge_model.unresolved_count, merge_model.unresolved_count == 1 and '' or 's'),
+        vim.log.levels.WARN
+      )
+    end
+    return false
+  end
+
+  local completed_file = state.file
+  local context = git.get_operation_context()
+  local ok, err = git.stage_merge_result(completed_file)
+  if not ok then
+    vim.notify('glance: failed to stage merge result: ' .. tostring(err), vim.log.levels.ERROR)
+    return false
+  end
+
+  local snapshot = git.get_status_snapshot()
+  filetree.note_repo_activity()
+  diffview.close(false)
+  notify_post_complete(context, snapshot.files)
   return true
 end
 

@@ -59,4 +59,8 @@ function M.apply(merge_model, index, action)
   return model.apply_action(merge_model, index, action)
 end
 
+function M.apply_all(merge_model, action)
+  return model.apply_all(merge_model, action)
+end
+
 return M

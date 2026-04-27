@@ -242,6 +242,37 @@ return {
       end,
     },
     {
+      name = 'opening a file suppresses redraw while invoking the diff opener',
+      run = function()
+        N.with_repo('repo_modified', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local original_open = diffview.open
+          local original_lazyredraw = vim.o.lazyredraw
+          local seen_lazyredraw = nil
+
+          diffview.open = function()
+            seen_lazyredraw = vim.o.lazyredraw
+          end
+
+          local ok, err = pcall(function()
+            vim.o.lazyredraw = false
+            ui.open_file(filetree.files.changes[1])
+            A.equal(seen_lazyredraw, true)
+            A.equal(vim.o.lazyredraw, false)
+          end)
+
+          diffview.open = original_open
+          vim.o.lazyredraw = original_lazyredraw
+          if not ok then
+            error(err)
+          end
+        end)
+      end,
+    },
+    {
       name = 'close diff restores width welcome and refreshes the tree',
       run = function()
         N.with_repo('repo_modified', function()

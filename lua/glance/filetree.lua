@@ -16,6 +16,7 @@ M.last_cursor_line = nil -- Tracks the previous cursor line for arrow-key snappi
 M.repo_head_oid = nil
 M.repo_snapshot_key = ''
 M.repo_status_output = ''
+M.operation_context = nil
 
 local function filetree_options()
   return config.options.windows.filetree
@@ -77,13 +78,6 @@ local function add_legend_key_highlights(highlights, line, text)
 
     start_col = bracket_end + 1
   end
-end
-
-local function legend_line_count()
-  if filetree_config().show_legend then
-    return 7
-  end
-  return 0
 end
 
 local function files_empty(files)
@@ -212,34 +206,105 @@ local function snap_to_nearest_file(line, prefer_up)
   scan(line - 1, 1, -1)
 end
 
-local function add_legend(lines, highlights)
+local function operation_label(context)
+  local labels = {
+    merge = 'merge',
+    rebase = 'rebase',
+    cherry_pick = 'cherry-pick',
+    revert = 'revert',
+  }
+  return labels[context and context.kind] or 'operation'
+end
+
+local function operation_title(context)
+  local labels = {
+    merge = 'Merge',
+    rebase = 'Rebase',
+    cherry_pick = 'Cherry-pick',
+    revert = 'Revert',
+  }
+  return labels[context and context.kind] or 'Operation'
+end
+
+local function display_key(lhs)
+  if type(lhs) ~= 'string' then
+    return ''
+  end
+
+  return lhs:gsub('<Leader>', '\\'):gsub('<leader>', '\\')
+end
+
+local function add_legend(lines, highlights, operation_context)
   local km = config.options.keymaps
+  local merge_km = config.options.merge.keymaps or {}
   local title = '  actions'
-  local commit_line = '  [' .. km.commit .. '] commit staged changes'
+  local commit_action = 'commit staged changes'
+  if operation_context and operation_context.kind == 'merge' then
+    commit_action = 'commit merge'
+  end
+  local commit_line = '  [' .. km.commit .. '] ' .. commit_action
+  local continue_line = nil
+  if operation_context and operation_context.kind and operation_context.kind ~= 'merge' then
+    local continue_key = display_key(merge_km.continue_operation)
+    if continue_key ~= '' then
+      continue_line = '  [' .. continue_key .. '] continue ' .. operation_label(operation_context)
+    end
+  end
   local log_line = '  [' .. km.log .. '] browse commit history'
-  local stage_line = '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all'
-  local unstage_line = '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all'
-  local discard_line = '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all'
+  local action_lines = {
+    '  [' .. km.stage_file .. '] stage   [' .. km.stage_all .. '] stage all',
+    '  [' .. km.unstage_file .. '] unstage [' .. km.unstage_all .. '] unstage all',
+    '  [' .. km.discard_file .. '] discard [' .. km.discard_all .. '] discard all',
+    commit_line,
+  }
+  if continue_line then
+    action_lines[#action_lines + 1] = continue_line
+  end
+  action_lines[#action_lines + 1] = log_line
 
   lines[#lines + 1] = title
-  lines[#lines + 1] = stage_line
-  lines[#lines + 1] = unstage_line
-  lines[#lines + 1] = discard_line
-  lines[#lines + 1] = commit_line
-  lines[#lines + 1] = log_line
+  for _, line in ipairs(action_lines) do
+    lines[#lines + 1] = line
+  end
   lines[#lines + 1] = ''
 
   add_highlight(highlights, 1, 2, #title, 'GlanceLegendTitle')
-  add_highlight(highlights, 2, 0, #stage_line, 'GlanceLegendText')
-  add_highlight(highlights, 3, 0, #unstage_line, 'GlanceLegendText')
-  add_highlight(highlights, 4, 0, #discard_line, 'GlanceLegendText')
-  add_highlight(highlights, 5, 0, #commit_line, 'GlanceLegendText')
-  add_highlight(highlights, 6, 0, #log_line, 'GlanceLegendText')
-  add_legend_key_highlights(highlights, 2, stage_line)
-  add_legend_key_highlights(highlights, 3, unstage_line)
-  add_legend_key_highlights(highlights, 4, discard_line)
-  add_legend_key_highlights(highlights, 5, commit_line)
-  add_legend_key_highlights(highlights, 6, log_line)
+  for index, line in ipairs(action_lines) do
+    local line_number = index + 1
+    add_highlight(highlights, line_number, 0, #line, 'GlanceLegendText')
+    add_legend_key_highlights(highlights, line_number, line)
+  end
+end
+
+local function merge_ready_message()
+  local km = config.options.keymaps
+  return {
+    title = '  Merge ready to complete',
+    detail = '  Press ' .. display_key(km.commit) .. ' to commit the merge',
+  }
+end
+
+local function operation_ready_message(context)
+  if not context or not context.kind then
+    return nil
+  end
+
+  if context.kind == 'merge' then
+    return merge_ready_message()
+  end
+
+  local key = display_key(config.options.merge.keymaps.continue_operation)
+  local detail
+  if key ~= '' then
+    detail = '  Press ' .. key .. ' to continue'
+  else
+    detail = '  Continue the ' .. operation_label(context) .. ' from the filetree'
+  end
+
+  return {
+    title = '  ' .. operation_title(context) .. ' ready to continue',
+    detail = detail,
+  }
 end
 
 --- Create the file tree buffer with appropriate settings.
@@ -273,7 +338,8 @@ function M.create_buf()
 end
 
 --- Render the file list with section headers into the buffer.
-function M.render(files)
+function M.render(files, opts)
+  opts = opts or {}
   files = files or {}
   files = {
     conflicts = files.conflicts or {},
@@ -283,14 +349,16 @@ function M.render(files)
   }
 
   M.files = files
+  M.operation_context = opts.operation_context
   M.line_map = {}
   M.selected_line = nil
 
   local lines = {}
   local highlights = {} -- { line, col_start, col_end, hl_group }
   if filetree_config().show_legend then
-    add_legend(lines, highlights)
+    add_legend(lines, highlights, opts.operation_context)
   end
+  local legend_lines = #lines
 
   local function add_section(title, file_list)
     if #file_list == 0 then
@@ -298,7 +366,7 @@ function M.render(files)
     end
 
     -- Blank line before section (except at the very start)
-    if #lines > legend_line_count() then
+    if #lines > legend_lines then
       table.insert(lines, '')
       -- line_map entry is nil by default (no action needed)
     end
@@ -329,9 +397,17 @@ function M.render(files)
   add_section('Untracked', files.untracked)
 
   -- Handle empty state
-  if #lines == legend_line_count() then
-    lines[#lines + 1] = '  No changes found'
-    add_highlight(highlights, #lines, 0, 20, 'Comment')
+  if #lines == legend_lines then
+    local ready = operation_ready_message(opts.operation_context)
+    if ready then
+      lines[#lines + 1] = ready.title
+      add_highlight(highlights, #lines, 0, #ready.title, 'GlanceSectionHeader')
+      lines[#lines + 1] = ready.detail
+      add_highlight(highlights, #lines, 0, #ready.detail, 'Comment')
+    else
+      lines[#lines + 1] = '  No changes found'
+      add_highlight(highlights, #lines, 0, 20, 'Comment')
+    end
   end
 
   -- Write to buffer
@@ -511,7 +587,10 @@ function M.apply_status_snapshot(snapshot)
   M.repo_head_oid = snapshot.head_oid
   M.repo_snapshot_key = snapshot.key or ''
   M.repo_status_output = snapshot.output or ''
-  M.render(snapshot.files)
+  local operation_context = snapshot.operation_context or require('glance.git').get_operation_context()
+  M.render(snapshot.files, {
+    operation_context = operation_context,
+  })
   restore_selection(saved_line)
 end
 
@@ -633,8 +712,9 @@ function M.toggle()
   end
 end
 
-local function confirm_action(message, accept_label)
-  return vim.fn.confirm(message, '&' .. accept_label .. '\n&Cancel', 2) == 1
+local function confirm_action(message, accept_label, cancel_label)
+  cancel_label = cancel_label or '&Cancel'
+  return vim.fn.confirm(message, '&' .. accept_label .. '\n' .. cancel_label, 2) == 1
 end
 
 local function active_diff_matches_file(file)
@@ -729,6 +809,13 @@ local function refresh_after_discard(active_file)
   if ui.diff_open and active_file then
     M.highlight_active(active_file)
   end
+end
+
+local function notify_operation_continue_error(context, err)
+  vim.notify(
+    'glance: failed to continue ' .. operation_label(context) .. ': ' .. tostring(err),
+    vim.log.levels.ERROR
+  )
 end
 
 function M.discard_selected_file()
@@ -956,6 +1043,55 @@ function M.open_commit_editor()
   })
 end
 
+function M.continue_operation()
+  local git = require('glance.git')
+  local context = git.get_operation_context()
+
+  if not context.kind then
+    vim.notify('glance: no merge operation is ready to continue', vim.log.levels.WARN)
+    return false
+  end
+
+  local snapshot = git.get_status_snapshot()
+  if #((snapshot.files or {}).conflicts or {}) > 0 then
+    vim.notify('glance: resolve all conflicts before continuing ' .. operation_label(context), vim.log.levels.WARN)
+    return false
+  end
+
+  if context.kind == 'merge' then
+    M.open_commit_editor()
+    return true
+  end
+
+  if not confirm_action('Continue ' .. operation_label(context) .. '?', 'Continue', 'Ca&ncel') then
+    return false
+  end
+
+  local ok, err = git.continue_operation(context)
+  if not ok then
+    notify_operation_continue_error(context, err)
+    M.refresh()
+    return false
+  end
+
+  M.refresh()
+
+  if #(M.files.conflicts or {}) > 0 then
+    vim.notify('glance: ' .. operation_label(context) .. ' stopped at new conflicts', vim.log.levels.WARN)
+    require('glance.ui').open_file(M.files.conflicts[1])
+    return true
+  end
+
+  local after_context = git.get_operation_context()
+  if after_context.kind then
+    vim.notify('glance: ' .. operation_label(context) .. ' is still in progress', vim.log.levels.INFO)
+  else
+    vim.notify('glance: ' .. operation_label(context) .. ' complete', vim.log.levels.INFO)
+  end
+
+  return true
+end
+
 function M.open_log_view()
   local log_view = require('glance.log_view')
   if log_view.is_open() then
@@ -970,6 +1106,7 @@ end
 function M.setup_keymaps()
   local opts = { noremap = true, silent = true, buffer = M.buf }
   local km = config.options.keymaps
+  local merge_km = config.options.merge.keymaps or {}
 
   vim.keymap.set('n', 'j', function() for _ = 1, vim.v.count1 do M.move_down() end end, opts)
   vim.keymap.set('n', 'k', function() for _ = 1, vim.v.count1 do M.move_up() end end, opts)
@@ -988,6 +1125,7 @@ function M.setup_keymaps()
   vim.keymap.set('n', km.unstage_all, function() M.unstage_all() end, opts)
   vim.keymap.set('n', km.discard_file, function() M.discard_selected_file() end, opts)
   vim.keymap.set('n', km.discard_all, function() M.discard_all() end, opts)
+  vim.keymap.set('n', merge_km.continue_operation, function() M.continue_operation() end, opts)
   vim.keymap.set('n', km.open_file, function()
     local file = M.get_selected_file()
     if file then

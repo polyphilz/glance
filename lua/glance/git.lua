@@ -147,8 +147,12 @@ local function run_git_capture_at_root_async(root, args, opts, callback)
   local cmd = { 'git', '-C', root }
   vim.list_extend(cmd, args)
   local schedule_callback = opts == nil or opts.schedule_callback ~= false
+  local system_opts = { text = true }
+  if opts and opts.env then
+    system_opts.env = opts.env
+  end
 
-  vim.system(cmd, { text = true }, function(result)
+  vim.system(cmd, system_opts, function(result)
     local output = result.stdout or ''
     local allowed_codes = (opts and opts.allowed_codes) or { 0 }
     local function deliver(...)
@@ -179,7 +183,12 @@ local function run_git_capture_at_root(root, args, opts)
   local cmd = { 'git', '-C', root }
   vim.list_extend(cmd, args)
 
-  local result = vim.system(cmd, { text = true }):wait()
+  local system_opts = { text = true }
+  if opts and opts.env then
+    system_opts.env = opts.env
+  end
+
+  local result = vim.system(cmd, system_opts):wait()
   local allowed_codes = (opts and opts.allowed_codes) or { 0 }
   local stdout = result.stdout or ''
   local stderr = result.stderr or ''
@@ -1293,6 +1302,11 @@ function M.can_commit(files)
     return false, M.CONFLICT_COMMIT_MESSAGE
   end
 
+  local context = M.get_operation_context()
+  if context.kind == 'merge' then
+    return true
+  end
+
   if #(files.staged or {}) == 0 then
     return false, M.NO_STAGED_COMMIT_MESSAGE
   end
@@ -1423,6 +1437,19 @@ function M.stage_file(file)
   return run_git(args)
 end
 
+--- Stage a completed merge result for a conflicted path.
+--- This intentionally bypasses ordinary stage safety, because resolving an
+--- unmerged index entry is exactly the operation merge completion needs.
+--- @param file { path: string }|nil
+--- @return boolean, string|nil
+function M.stage_merge_result(file)
+  if type(file) ~= 'table' or type(file.path) ~= 'string' or file.path == '' then
+    return false, 'invalid file target'
+  end
+
+  return run_git({ 'add', '--', file.path })
+end
+
 --- Unstage all git-visible changes for a single file path set.
 --- @param file { path: string, old_path: string|nil }|nil
 --- @return boolean, string|nil
@@ -1496,6 +1523,26 @@ function M.commit(message, files)
   end
 
   return true
+end
+
+--- Continue the active sequencer-style Git operation.
+--- @param context table|nil
+--- @return boolean, string|nil
+function M.continue_operation(context)
+  context = context or M.get_operation_context()
+  local kind = context and context.kind or nil
+
+  if kind == 'rebase' then
+    return run_git({ '-c', 'core.editor=true', 'rebase', '--continue' })
+  end
+  if kind == 'cherry_pick' then
+    return run_git({ '-c', 'core.editor=true', 'cherry-pick', '--continue' })
+  end
+  if kind == 'revert' then
+    return run_git({ '-c', 'core.editor=true', 'revert', '--continue' })
+  end
+
+  return false, 'no continuable git operation is active'
 end
 
 --- Discard all git-visible changes for a single file path.

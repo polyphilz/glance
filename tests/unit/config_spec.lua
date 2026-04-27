@@ -83,9 +83,14 @@ return {
               accept_theirs = '<leader>t',
               accept_both_ours_then_theirs = '<leader>O',
               accept_both_theirs_then_ours = '<leader>T',
+              accept_all_ours = '<leader>ao',
+              accept_all_theirs = '<leader>at',
               keep_base = '<leader>b',
               reset_conflict = '<leader>r',
+              reset_result = '<leader>R',
               mark_resolved = '<leader>m',
+              complete_merge = '<leader>c',
+              continue_operation = '<leader>C',
             },
           },
           keymaps = {
@@ -192,6 +197,10 @@ return {
         A.equal(config.options.log.max_commits, 75)
         A.equal(config.options.merge.keymaps.accept_ours, 'go')
         A.equal(config.options.merge.keymaps.accept_theirs, '<leader>t')
+        A.equal(config.options.merge.keymaps.accept_all_ours, '<leader>ao')
+        A.equal(config.options.merge.keymaps.reset_result, '<leader>R')
+        A.equal(config.options.merge.keymaps.complete_merge, '<leader>c')
+        A.equal(config.options.merge.keymaps.continue_operation, '<leader>C')
         A.equal(config.options.windows.diff.relativenumber, false)
         A.equal(config.options.theme.preset, 'one_light')
         A.equal(config.options.theme.palette.logo, '#ffffff')

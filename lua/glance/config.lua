@@ -96,9 +96,14 @@ local ALLOWED_MERGE_KEYMAPS = {
   accept_theirs = true,
   accept_both_ours_then_theirs = true,
   accept_both_theirs_then_ours = true,
+  accept_all_ours = true,
+  accept_all_theirs = true,
   keep_base = true,
   reset_conflict = true,
+  reset_result = true,
   mark_resolved = true,
+  complete_merge = true,
+  continue_operation = true,
 }
 
 local MERGE_KEYMAP_ORDER = {
@@ -106,9 +111,14 @@ local MERGE_KEYMAP_ORDER = {
   'accept_theirs',
   'accept_both_ours_then_theirs',
   'accept_both_theirs_then_ours',
+  'accept_all_ours',
+  'accept_all_theirs',
   'keep_base',
   'reset_conflict',
+  'reset_result',
   'mark_resolved',
+  'complete_merge',
+  'continue_operation',
 }
 
 local ALLOWED_FILETREE_WINDOW = {
@@ -254,9 +264,14 @@ local BASE_DEFAULTS = {
       accept_theirs = '<leader>t',
       accept_both_ours_then_theirs = '<leader>O',
       accept_both_theirs_then_ours = '<leader>T',
+      accept_all_ours = '<leader>ao',
+      accept_all_theirs = '<leader>at',
       keep_base = '<leader>b',
       reset_conflict = '<leader>r',
+      reset_result = '<leader>R',
       mark_resolved = '<leader>m',
+      complete_merge = '<leader>c',
+      continue_operation = '<leader>C',
     },
   },
   keymaps = {

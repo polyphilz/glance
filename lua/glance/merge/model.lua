@@ -927,12 +927,15 @@ local function build_model(file, opts)
     conflict.theirs_ends_with_newline = theirs_ends_with_newline
   end
   local resolved_stable_segments = stable_segments
-  local outcomes = infer_conflict_states_strict(stable_segments, conflicts, current_lines, opts)
-  if not outcomes then
-    resolved_stable_segments, outcomes = infer_conflict_states_relaxed(stable_segments, conflicts, current_lines, opts)
-    if stable_segments_contain_conflict_markers(resolved_stable_segments) then
-      resolved_stable_segments = stable_segments
-      outcomes = nil
+  local outcomes = nil
+  if not opts.force_unresolved then
+    outcomes = infer_conflict_states_strict(stable_segments, conflicts, current_lines, opts)
+    if not outcomes then
+      resolved_stable_segments, outcomes = infer_conflict_states_relaxed(stable_segments, conflicts, current_lines, opts)
+      if stable_segments_contain_conflict_markers(resolved_stable_segments) then
+        resolved_stable_segments = stable_segments
+        outcomes = nil
+      end
     end
   end
 
@@ -987,7 +990,7 @@ local function build_model(file, opts)
     result_lines = result_lines,
     result_ends_with_newline = result_ends_with_newline,
     unresolved_count = unresolved_count,
-    inference_failed = outcomes == nil,
+    inference_failed = outcomes == nil and not opts.force_unresolved,
   }
 end
 
@@ -1057,6 +1060,19 @@ local function build_persisted_lines(merge_model)
   return lines
 end
 
+local function refresh_result_projection(merge_model, current_ends_with_newline)
+  local result_lines, unresolved_count, result_ends_with_newline = build_result_projection(
+    merge_model.stable_segments or merge_model.canonical_stable_segments or {},
+    merge_model.conflicts or {},
+    current_ends_with_newline
+  )
+
+  merge_model.result_lines = result_lines
+  merge_model.unresolved_count = unresolved_count
+  merge_model.result_ends_with_newline = result_ends_with_newline
+  return merge_model
+end
+
 local function finalize_conflict_action(conflict)
   if conflict.state == 'manual_resolved' then
     conflict.ours_handled = true
@@ -1082,6 +1098,12 @@ end
 
 function M.build(file, opts)
   return build_model(file, opts)
+end
+
+function M.reset_result(file)
+  return build_model(file, {
+    force_unresolved = true,
+  })
 end
 
 function M.apply_action(merge_model, index, action)
@@ -1145,6 +1167,41 @@ function M.apply_action(merge_model, index, action)
   end
 
   return nil, 'unknown merge action'
+end
+
+function M.apply_all(merge_model, action)
+  if action ~= 'accept_ours' and action ~= 'accept_theirs' then
+    return nil, 'unsupported accept-all action'
+  end
+  if type(merge_model) ~= 'table' or type(merge_model.conflicts) ~= 'table' then
+    return nil, 'merge model is not active'
+  end
+  if merge_model.inference_failed then
+    return nil, 'cannot safely apply bulk merge actions because result mapping is uncertain'
+  end
+
+  local next_model = vim.deepcopy(merge_model)
+  local applied = 0
+  local skipped = 0
+
+  for index, conflict in ipairs(next_model.conflicts) do
+    if conflict.state == 'unresolved' and not conflict.handled then
+      local _, err = M.apply_action(next_model, index, action)
+      if err then
+        return nil, err
+      end
+      applied = applied + 1
+    else
+      skipped = skipped + 1
+    end
+  end
+
+  refresh_result_projection(next_model, next_model.current_ends_with_newline)
+  return {
+    model = next_model,
+    applied = applied,
+    skipped = skipped,
+  }
 end
 
 function M.prepare_write(file, current_lines, opts)

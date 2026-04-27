@@ -680,5 +680,65 @@ return {
         end)
       end,
     },
+    {
+      name = 'apply_all accepts only default unresolved conflicts and skips handled or manual conflicts',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          local git = require('glance.git')
+          local merge_model = require('glance.merge.model')
+          local file = git.get_changed_files().conflicts[1]
+          local built = assert(merge_model.build(file))
+
+          assert(merge_model.apply_action(built, 1, 'accept_theirs'))
+          built.conflicts[2].state = 'manual_unresolved'
+          built.conflicts[2].current_result_lines = { 'manual second' }
+          built.conflicts[2].current_lines = built.conflicts[2].current_result_lines
+          built.conflicts[2].current_kind = 'manual'
+          built.conflicts[2].handled = false
+
+          local result = assert(merge_model.apply_all(built, 'accept_ours'))
+
+          A.equal(result.applied, 0)
+          A.equal(result.skipped, 2)
+          A.equal(result.model.conflicts[1].state, 'theirs')
+          A.equal(result.model.conflicts[2].state, 'manual_unresolved')
+          A.same(result.model.result_lines, {
+            'intro',
+            'first feature',
+            'gap one',
+            'gap two',
+            'gap three',
+            'manual second',
+            'outro',
+          })
+        end)
+      end,
+    },
+    {
+      name = 'reset_result rebuilds the default unresolved projection from stages',
+      run = function()
+        N.with_repo('repo_conflict_multi', function()
+          local git = require('glance.git')
+          local merge_model = require('glance.merge.model')
+          local file = git.get_changed_files().conflicts[1]
+
+          local reset = assert(merge_model.reset_result(file))
+
+          A.equal(reset.unresolved_count, 2)
+          A.equal(reset.conflicts[1].state, 'unresolved')
+          A.equal(reset.conflicts[2].state, 'unresolved')
+          A.same(reset.result_lines, {
+            'intro',
+            'first base',
+            'gap one',
+            'gap two',
+            'gap three',
+            'second base',
+            'outro',
+          })
+          A.falsy(reset.inference_failed)
+        end)
+      end,
+    },
   },
 }

@@ -165,6 +165,63 @@ return {
       end,
     },
     {
+      name = 'render shows merge-ready state when a merge has no visible changes',
+      run = function()
+        local filetree = setup_filetree()
+        filetree.render({
+          conflicts = {},
+          staged = {},
+          changes = {},
+          untracked = {},
+        }, {
+          operation_context = { kind = 'merge' },
+        })
+
+        A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  [c] commit merge',
+          '  [L] browse commit history',
+          '',
+          '  Merge ready to complete',
+          '  Press c to commit the merge',
+        })
+        A.equal(filetree.get_selected_file(), nil)
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+      end,
+    },
+    {
+      name = 'render shows continue action for operation-ready state',
+      run = function()
+        local filetree = setup_filetree()
+        filetree.render({
+          conflicts = {},
+          staged = {},
+          changes = {},
+          untracked = {},
+        }, {
+          operation_context = { kind = 'rebase' },
+        })
+
+        A.same(vim.api.nvim_buf_get_lines(filetree.buf, 0, -1, false), {
+          '  actions',
+          '  [s] stage   [S] stage all',
+          '  [u] unstage [U] unstage all',
+          '  [d] discard [D] discard all',
+          '  [c] commit staged changes',
+          '  [\\C] continue rebase',
+          '  [L] browse commit history',
+          '',
+          '  Rebase ready to continue',
+          '  Press \\C to continue',
+        })
+        A.equal(filetree.get_selected_file(), nil)
+        A.equal(vim.api.nvim_get_option_value('cursorline', { win = filetree.win }), false)
+      end,
+    },
+    {
       name = 'render restores cursorline when files return',
       run = function()
         local filetree = setup_filetree()
@@ -1018,6 +1075,59 @@ return {
         diffview.close = original_close
         diffview.new_buf = nil
         ui.diff_open = false
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
+      name = 'continue operation confirmation uses distinct shortcuts',
+      run = function()
+        local git = require('glance.git')
+        local filetree = setup_filetree()
+        local original_context = git.get_operation_context
+        local original_snapshot = git.get_status_snapshot
+        local original_continue = git.continue_operation
+        local original_refresh = filetree.refresh
+        local original_confirm = vim.fn.confirm
+        local confirm_message
+        local confirm_choices
+        local confirm_default
+        local continued = false
+
+        local ok, err = xpcall(function()
+          git.get_operation_context = function()
+            return { kind = 'rebase' }
+          end
+          git.get_status_snapshot = function()
+            return snapshot()
+          end
+          git.continue_operation = function()
+            continued = true
+            return true
+          end
+          filetree.refresh = function()
+          end
+          vim.fn.confirm = function(message, choices, default)
+            confirm_message = message
+            confirm_choices = choices
+            confirm_default = default
+            return 2
+          end
+
+          A.equal(filetree.continue_operation(), false)
+          A.equal(confirm_message, 'Continue rebase?')
+          A.equal(confirm_choices, '&Continue\nCa&ncel')
+          A.equal(confirm_default, 2)
+          A.falsy(continued)
+        end, debug.traceback)
+
+        git.get_operation_context = original_context
+        git.get_status_snapshot = original_snapshot
+        git.continue_operation = original_continue
+        filetree.refresh = original_refresh
+        vim.fn.confirm = original_confirm
 
         if not ok then
           error(err)
