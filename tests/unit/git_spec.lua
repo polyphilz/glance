@@ -1278,6 +1278,123 @@ return {
       end,
     },
     {
+      name = 'integration classifies special conflict classes from unmerged stages',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_conflict_modify_delete', function(repo)
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 1)
+          local file = changed.conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          A.equal(file.path, repo.files.tracked)
+          A.equal(file.conflict_class, 'modify_delete')
+          A.equal(info.class, 'modify_delete')
+          A.equal(info.deleted_side, 'ours')
+          A.equal(info.theirs_path, repo.files.tracked)
+        end)
+
+        N.with_repo('repo_conflict_non_text_add_add', function(repo)
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 1)
+          local file = changed.conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          A.equal(file.path, repo.files.binary)
+          A.equal(file.conflict_class, 'non_text_add_add')
+          A.equal(info.class, 'non_text_add_add')
+          A.equal(info.ours_path, repo.files.binary)
+          A.equal(info.theirs_path, repo.files.binary)
+        end)
+
+        N.with_repo('repo_conflict_binary', function(repo)
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 1)
+          local file = changed.conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          A.equal(file.path, repo.files.binary)
+          A.equal(file.conflict_class, 'binary')
+          A.equal(info.class, 'binary')
+        end)
+      end,
+    },
+    {
+      name = 'integration groups structural conflicts into logical filetree entries',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_conflict_rename_delete', function(repo)
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 1)
+          local file = changed.conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          A.equal(file.path, repo.files.renamed)
+          A.equal(file.old_path, repo.files.old)
+          A.equal(file.display_status, 'RD')
+          A.equal(file.conflict_class, 'rename_delete')
+          A.same(file.conflict_paths, { repo.files.old, repo.files.renamed })
+          A.equal(info.class, 'rename_delete')
+          A.equal(info.base_path, repo.files.old)
+          A.equal(info.ours_path, repo.files.renamed)
+          A.equal(info.deleted_side, 'theirs')
+        end)
+
+        N.with_repo('repo_conflict_rename_rename', function(repo)
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 1)
+          local file = changed.conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          A.equal(file.path, repo.files.ours)
+          A.equal(file.old_path, repo.files.old)
+          A.equal(file.display_status, 'RR')
+          A.equal(file.conflict_class, 'rename_rename')
+          A.same(file.conflict_paths, { repo.files.old, repo.files.ours, repo.files.theirs })
+          A.equal(info.class, 'rename_rename')
+          A.equal(info.ours_path, repo.files.ours)
+          A.equal(info.theirs_path, repo.files.theirs)
+        end)
+      end,
+    },
+    {
+      name = 'integration completes special conflict choices through the index',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_conflict_modify_delete', function(repo)
+          local file = git.get_changed_files().conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          local ok, err = git.apply_special_conflict_choice(info, 'theirs')
+          A.truthy(ok, err)
+          ok, err = git.complete_special_conflict_choice(info, 'theirs')
+          A.truthy(ok, err)
+
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 0)
+          A.equal(repo:read(repo.files.tracked), 'feature modified\n')
+        end)
+
+        N.with_repo('repo_conflict_rename_rename', function(repo)
+          local file = git.get_changed_files().conflicts[1]
+          local info = assert(git.get_conflict_info(file))
+
+          local ok, err = git.apply_special_conflict_choice(info, 'theirs')
+          A.truthy(ok, err)
+          ok, err = git.complete_special_conflict_choice(info, 'theirs')
+          A.truthy(ok, err)
+
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 0)
+          A.equal(repo:read(repo.files.theirs), 'theirs renamed\n')
+          A.falsy(vim.uv.fs_stat(repo:path(repo.files.ours)))
+        end)
+      end,
+    },
+    {
       name = 'commit supports resolved merge states even when the tree matches ours',
       run = function()
         N.with_repo('repo_conflict', function(repo)

@@ -7,6 +7,7 @@ M.FILETREE_ROLE = 'filetree'
 M.THEIRS_ROLE = 'merge_theirs'
 M.OURS_ROLE = 'merge_ours'
 M.RESULT_ROLE = 'merge_result'
+M.SPECIAL_ROLE = 'merge_special'
 
 function M.workspace_spec()
   return {
@@ -49,6 +50,40 @@ function M.open(diffview)
     theirs = { win = theirs_win, buf = theirs_buf },
     ours = { win = ours_win, buf = ours_buf },
   }
+end
+
+function M.special_workspace_spec()
+  return {
+    roles = {
+      { role = M.FILETREE_ROLE, kind = 'sidebar' },
+      { role = M.SPECIAL_ROLE, kind = 'content' },
+    },
+    preferred_focus_role = M.SPECIAL_ROLE,
+    editable_role = M.SPECIAL_ROLE,
+  }
+end
+
+function M.open_special(diffview)
+  diffview.configure_workspace(M.special_workspace_spec())
+  local win, buf = diffview.open_workspace_pane(M.SPECIAL_ROLE)
+  return {
+    special = { win = win, buf = buf },
+  }
+end
+
+function M.equalize_special(diffview)
+  local tree_visible = filetree.win and vim.api.nvim_win_is_valid(filetree.win)
+  if tree_visible then
+    vim.api.nvim_win_set_width(filetree.win, require('glance.config').options.windows.filetree.width)
+  end
+end
+
+function M.special_hoverable_separator_wins()
+  local wins = {}
+  if filetree.win and vim.api.nvim_win_is_valid(filetree.win) then
+    wins[#wins + 1] = filetree.win
+  end
+  return wins
 end
 
 function M.equalize(diffview)

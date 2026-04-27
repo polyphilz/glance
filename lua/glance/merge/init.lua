@@ -5,6 +5,7 @@ local git = require('glance.git')
 local layout = require('glance.merge.layout')
 local model = require('glance.merge.model')
 local render = require('glance.merge.render')
+local special = require('glance.merge.special')
 local workspace = require('glance.workspace')
 
 local M = {}
@@ -570,7 +571,7 @@ local function bind_result_tracking(diffview, file)
 end
 
 function M.is_active()
-  return state.active == true
+  return state.active == true or special.is_active()
 end
 
 function M.jump_to_conflict(diffview, index)
@@ -643,6 +644,9 @@ function M.jump_prev(diffview)
 end
 
 function M.equalize_panes(diffview)
+  if special.is_active() then
+    return special.equalize_panes(diffview)
+  end
   if not state.active then
     return false
   end
@@ -652,6 +656,9 @@ function M.equalize_panes(diffview)
 end
 
 function M.hoverable_separator_wins(diffview)
+  if special.is_active() then
+    return special.hoverable_separator_wins(diffview)
+  end
   if not state.active then
     return nil
   end
@@ -680,6 +687,15 @@ local function rebuild(diffview, file, existing_model)
 end
 
 function M.open(diffview, file)
+  local info = git.get_conflict_info(file)
+  if special.open(diffview, file, info) then
+    state.active = false
+    state.file = nil
+    state.model = nil
+    state.active_conflict_index = nil
+    return
+  end
+
   local merge_model, err = model.build(file)
   if not merge_model then
     state.active = false
@@ -727,6 +743,10 @@ function M.open(diffview, file)
 end
 
 function M.refresh(diffview, file)
+  if special.is_active() then
+    return special.refresh(diffview, file)
+  end
+
   if not state.active then
     return false
   end
@@ -761,6 +781,10 @@ function M.refresh(diffview, file)
 end
 
 function M.complete(diffview)
+  if special.is_active() then
+    return special.complete(diffview)
+  end
+
   if not state.active or not state.file then
     return false
   end
@@ -823,6 +847,7 @@ function M.reset()
   state.active_conflict_index = nil
   state.write_in_progress = false
   state.sync_in_progress = false
+  special.reset()
 end
 
 return M
