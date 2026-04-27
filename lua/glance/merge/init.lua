@@ -1,3 +1,4 @@
+local actions = require('glance.merge.actions')
 local config = require('glance.config')
 local filetree = require('glance.filetree')
 local git = require('glance.git')
@@ -14,6 +15,7 @@ local state = {
   model = nil,
   active_conflict_index = nil,
   write_in_progress = false,
+  sync_in_progress = false,
 }
 
 local function panes(diffview)
@@ -31,6 +33,14 @@ local function panes(diffview)
       buf = workspace.get_buf(diffview.workspace, layout.RESULT_ROLE),
     },
   }
+end
+
+local function refresh_decorations(diffview)
+  if not state.model then
+    return
+  end
+
+  render.decorate(panes(diffview), state.model, state.active_conflict_index)
 end
 
 local function result_win(diffview)
@@ -80,6 +90,49 @@ end
 local function first_unresolved_index()
   local unresolved = unresolved_indices()
   return unresolved[1]
+end
+
+local function conflict_index_for_result_line(line)
+  if not state.model then
+    return nil
+  end
+
+  for index, conflict in ipairs(state.model.conflicts) do
+    local start = conflict.result_range.start
+    local count = conflict.result_range.count
+    if count == 0 then
+      if line == start then
+        return index
+      end
+    elseif line >= start and line < (start + count) then
+      return index
+    end
+  end
+
+  return nil
+end
+
+local function update_active_conflict_from_cursor(diffview)
+  local win = result_win(diffview)
+  if not win or vim.api.nvim_get_current_win() ~= win then
+    return state.active_conflict_index
+  end
+
+  local index = conflict_index_for_result_line(vim.api.nvim_win_get_cursor(win)[1])
+  if index then
+    state.active_conflict_index = index
+  end
+
+  return state.active_conflict_index
+end
+
+local function current_conflict_index(diffview)
+  local index = update_active_conflict_from_cursor(diffview)
+  if index and state.model and state.model.conflicts[index] then
+    return index
+  end
+
+  return state.active_conflict_index or first_unresolved_index() or 1
 end
 
 local function focus_result(diffview)
@@ -174,6 +227,69 @@ local function bind_write_command(diffview, file)
   })
 end
 
+local function sync_from_result_buffer(diffview, file, previous_model)
+  local buf = result_buf(diffview)
+  if not buf then
+    return nil, 'merge result buffer is not available'
+  end
+
+  local merge_model, err = model.build(file, {
+    current_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false),
+    current_ends_with_newline = vim.api.nvim_get_option_value('endofline', { buf = buf }),
+    previous_model = previous_model or state.model,
+    manual_clean_state = 'manual_unresolved',
+  })
+  if not merge_model then
+    return nil, err
+  end
+
+  state.file = file
+  state.model = merge_model
+  render.apply(diffview, panes(diffview), merge_model, file, {
+    refresh_sources = false,
+    refresh_result = false,
+    active_conflict_index = state.active_conflict_index,
+  })
+  update_active_conflict_from_cursor(diffview)
+  refresh_decorations(diffview)
+  return merge_model
+end
+
+local function apply_action(diffview, action)
+  local buf = result_buf(diffview)
+  if not buf then
+    return false
+  end
+
+  local index = current_conflict_index(diffview)
+  local conflict = state.model and state.model.conflicts[index] or nil
+  if not conflict then
+    return false
+  end
+
+  local start_line = conflict.result_range.start - 1
+  local stop_line = conflict.result_range.start + conflict.result_range.count - 1
+  local previous_model = state.model
+  local updated, err = actions.apply(previous_model, index, action)
+  if not updated then
+    vim.notify('glance: failed to apply merge action: ' .. err, vim.log.levels.WARN)
+    return false
+  end
+
+  state.sync_in_progress = true
+  vim.api.nvim_buf_set_lines(buf, start_line, stop_line, false, updated.current_result_lines or updated.current_lines or {})
+  state.sync_in_progress = false
+
+  local merge_model, sync_err = sync_from_result_buffer(diffview, state.file, previous_model)
+  if not merge_model then
+    vim.notify('glance: failed to refresh merge state: ' .. sync_err, vim.log.levels.WARN)
+    return false
+  end
+
+  M.jump_to_conflict(diffview, index)
+  return true
+end
+
 local function bind_navigation_keymaps(diffview)
   for _, role in ipairs({ layout.THEIRS_ROLE, layout.OURS_ROLE, layout.RESULT_ROLE }) do
     local buf = workspace.get_buf(diffview.workspace, role)
@@ -192,6 +308,58 @@ local function bind_navigation_keymaps(diffview)
       })
     end
   end
+end
+
+local function bind_action_keymaps(diffview)
+  local keymaps = config.options.merge.keymaps or {}
+  for _, role in ipairs({ layout.THEIRS_ROLE, layout.OURS_ROLE, layout.RESULT_ROLE }) do
+    local buf = workspace.get_buf(diffview.workspace, role)
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      for action, lhs in pairs(keymaps) do
+        vim.keymap.set('n', lhs, function()
+          apply_action(diffview, action)
+        end, {
+          buffer = buf,
+          silent = true,
+        })
+      end
+    end
+  end
+end
+
+local function bind_result_tracking(diffview, file)
+  local buf = result_buf(diffview)
+  if not buf then
+    return
+  end
+
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+    group = diffview.autocmd_group,
+    buffer = buf,
+    callback = function()
+      if state.write_in_progress or state.sync_in_progress then
+        return
+      end
+
+      local previous_model = state.model
+      local merge_model = sync_from_result_buffer(diffview, file, previous_model)
+      if not merge_model then
+        state.model = previous_model
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+    group = diffview.autocmd_group,
+    buffer = buf,
+    callback = function()
+      local previous = state.active_conflict_index
+      local current = update_active_conflict_from_cursor(diffview)
+      if current ~= previous then
+        refresh_decorations(diffview)
+      end
+    end,
+  })
 end
 
 function M.is_active()
@@ -219,6 +387,7 @@ function M.jump_to_conflict(diffview, index)
   vim.api.nvim_set_current_win(win)
   vim.api.nvim_win_set_cursor(win, { math.max(line, 1), 0 })
   state.active_conflict_index = index
+  refresh_decorations(diffview)
   return true
 end
 
@@ -291,7 +460,9 @@ local function rebuild(diffview, file)
 
   state.file = file
   state.model = merge_model
-  render.apply(diffview, panes(diffview), merge_model, file)
+  render.apply(diffview, panes(diffview), merge_model, file, {
+    active_conflict_index = state.active_conflict_index,
+  })
   layout.equalize(diffview)
   return merge_model
 end
@@ -329,6 +500,8 @@ function M.open(diffview, file)
   bind_write_command(diffview, file)
   diffview.bind_buffer_keymaps()
   bind_navigation_keymaps(diffview)
+  bind_action_keymaps(diffview)
+  bind_result_tracking(diffview, file)
 
   local first = first_unresolved_index() or 1
   if not M.jump_to_conflict(diffview, first) then
@@ -376,6 +549,7 @@ function M.reset()
   state.model = nil
   state.active_conflict_index = nil
   state.write_in_progress = false
+  state.sync_in_progress = false
 end
 
 return M

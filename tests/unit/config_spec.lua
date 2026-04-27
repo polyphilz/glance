@@ -76,6 +76,18 @@ return {
           log = {
             max_commits = 200,
           },
+          merge = {
+            keymaps = {
+              accept_ours = '<leader>o',
+              accept_theirs = '<leader>t',
+              accept_both_ours_then_theirs = '<leader>b',
+              accept_both_theirs_then_ours = '<leader>B',
+              ignore_ours = '<leader>O',
+              ignore_theirs = '<leader>T',
+              reset_conflict = '<leader>r',
+              mark_resolved = '<leader>m',
+            },
+          },
           keymaps = {
             open_file = '<CR>',
             quit = 'q',
@@ -144,6 +156,11 @@ return {
           log = {
             max_commits = 75,
           },
+          merge = {
+            keymaps = {
+              accept_ours = 'go',
+            },
+          },
           theme = {
             preset = 'one_light',
             palette = {
@@ -173,6 +190,8 @@ return {
         A.equal(config.options.windows.filetree.cursorline, true)
         A.equal(config.options.filetree.show_legend, false)
         A.equal(config.options.log.max_commits, 75)
+        A.equal(config.options.merge.keymaps.accept_ours, 'go')
+        A.equal(config.options.merge.keymaps.accept_theirs, '<leader>t')
         A.equal(config.options.windows.diff.relativenumber, false)
         A.equal(config.options.theme.preset, 'one_light')
         A.equal(config.options.theme.palette.logo, '#ffffff')

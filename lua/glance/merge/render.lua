@@ -1,3 +1,5 @@
+local actions = require('glance.merge.actions')
+local config = require('glance.config')
 local layout = require('glance.merge.layout')
 
 local M = {}
@@ -34,7 +36,90 @@ local function set_window_label(win, label)
   vim.api.nvim_set_option_value('winbar', label or '', { win = win })
 end
 
-local function role_label(model, role)
+local function pretty_state(state)
+  local labels = {
+    ours = 'ours',
+    theirs = 'theirs',
+    both_ours_then_theirs = 'both o/t',
+    both_theirs_then_ours = 'both t/o',
+    base_only = 'base',
+    manual_resolved = 'manual resolved',
+    manual_unresolved = 'manual unresolved',
+    unresolved = 'unresolved',
+  }
+
+  return labels[state] or tostring(state):gsub('_', ' ')
+end
+
+local function conflict_state_label(conflict)
+  if not conflict then
+    return nil
+  end
+
+  if conflict.state == 'manual_unresolved' then
+    return 'manual unresolved'
+  end
+  if conflict.state == 'manual_resolved' then
+    return 'manual resolved'
+  end
+  if conflict.handled then
+    return 'handled: ' .. pretty_state(conflict.state)
+  end
+  if conflict.state == 'unresolved' then
+    return 'unresolved'
+  end
+
+  return 'pending: ' .. pretty_state(conflict.state)
+end
+
+local function conflict_marker_group(conflict)
+  if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
+    return 'GlanceConflictMarkerManual'
+  end
+  if conflict.handled then
+    return 'GlanceConflictMarkerHandled'
+  end
+  return 'GlanceConflictMarkerUnresolved'
+end
+
+local function conflict_state_group(conflict)
+  if conflict.state == 'manual_unresolved' or conflict.state == 'manual_resolved' then
+    return 'GlanceConflictStateManual'
+  end
+  if conflict.handled then
+    return 'GlanceConflictStateHandled'
+  end
+  return 'GlanceConflictStateUnresolved'
+end
+
+local function result_label(model, active_conflict_index)
+  local op = model.operation or {}
+  local parts = {}
+  local conflict = active_conflict_index and model.conflicts[active_conflict_index] or nil
+
+  if op.prefix then
+    parts[#parts + 1] = op.prefix
+  end
+
+  parts[#parts + 1] = 'Result'
+  if conflict then
+    parts[#parts + 1] = string.format('%d/%d', active_conflict_index, #model.conflicts)
+    parts[#parts + 1] = conflict_state_label(conflict)
+  end
+  parts[#parts + 1] = string.format('%d unresolved', model.unresolved_count)
+  if model.inference_failed then
+    parts[#parts + 1] = 'inference fallback'
+  end
+
+  local label = table.concat(parts, ' | ')
+  local hint = conflict and actions.hint_text(conflict, config.options.merge.keymaps) or ''
+  if hint ~= '' then
+    return label .. '%=' .. hint
+  end
+  return label
+end
+
+local function role_label(model, role, active_conflict_index)
   local op = model.operation or {}
   local parts = {}
 
@@ -55,11 +140,7 @@ local function role_label(model, role)
       parts[#parts + 1] = op.ours_display
     end
   elseif role == layout.RESULT_ROLE then
-    parts[#parts + 1] = 'Result'
-    parts[#parts + 1] = string.format('%d unresolved', model.unresolved_count)
-    if model.inference_failed then
-      parts[#parts + 1] = 'inference fallback'
-    end
+    return result_label(model, active_conflict_index)
   end
 
   return table.concat(parts, ' | ')
@@ -86,30 +167,64 @@ local function add_line_range(buf, start_line, count, group)
   end
 end
 
-local function decorate_sources(buffers, model)
+local function add_result_range(buf, start_line, count, line_group, opts)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  if not start_line or count <= 0 then
+    return
+  end
+
+  opts = opts or {}
+  for index = start_line, start_line + count - 1 do
+    local extmark_opts = {
+      line_hl_group = line_group,
+      priority = opts.priority or 90,
+    }
+
+    if opts.number_group then
+      extmark_opts.number_hl_group = opts.number_group
+    end
+
+    vim.api.nvim_buf_set_extmark(buf, NS, index - 1, 0, extmark_opts)
+  end
+end
+
+local function zero_line_placeholder(conflict)
+  return '[' .. conflict_state_label(conflict) .. ']'
+end
+
+local function decorate_sources(buffers, model, active_conflict_index)
   clear_buffer(buffers.theirs)
   clear_buffer(buffers.ours)
   clear_buffer(buffers.result)
 
-  for _, conflict in ipairs(model.conflicts) do
+  for index, conflict in ipairs(model.conflicts) do
     add_line_range(buffers.theirs, conflict.theirs_range.start, conflict.theirs_range.count, 'GlanceDiffChangeOld')
     add_line_range(buffers.ours, conflict.ours_range.start, conflict.ours_range.count, 'GlanceDiffChangeNew')
 
-    local group = conflict.handled and 'GlanceAccentText' or 'DiffChange'
-    add_line_range(buffers.result, conflict.result_range.start, conflict.result_range.count, group)
+    local state_group = conflict_state_group(conflict)
+    local active_number_group = index == active_conflict_index and 'GlanceConflictActiveNumber' or nil
 
-    local label = conflict.handled and ('handled: ' .. conflict.state) or 'unresolved'
+    add_result_range(buffers.result, conflict.result_range.start, conflict.result_range.count, state_group, {
+      number_group = active_number_group,
+    })
+
     local line_count = math.max(vim.api.nvim_buf_line_count(buffers.result), 1)
     local anchor_line = math.min(math.max(conflict.result_range.start, 1), line_count) - 1
+    if conflict.result_range.count == 0 then
+      local extmark_opts = {
+        virt_lines = { { { zero_line_placeholder(conflict), conflict_marker_group(conflict) } } },
+        priority = 100,
+      }
+      if active_number_group then
+        extmark_opts.number_hl_group = active_number_group
+      end
 
-    if conflict.result_range.count > 0 then
-      vim.api.nvim_buf_set_extmark(buffers.result, NS, conflict.result_range.start - 1, 0, {
-        virt_text = { { label, 'Comment' } },
-        virt_text_pos = 'eol',
-      })
-    else
       vim.api.nvim_buf_set_extmark(buffers.result, NS, anchor_line, 0, {
-        virt_lines = { { { label, 'Comment' } } },
+        virt_lines = extmark_opts.virt_lines,
+        priority = extmark_opts.priority,
+        number_hl_group = extmark_opts.number_hl_group,
       })
     end
   end
@@ -137,32 +252,43 @@ local function prepare_result_buffer(diffview, buf, lines, path, ends_with_newli
   vim.api.nvim_set_option_value('endofline', ends_with_newline ~= false, { buf = buf })
 end
 
-function M.apply(diffview, panes, model, file)
-  prepare_source_buffer(
-    diffview,
-    panes.theirs.buf,
-    'glance://merge/theirs/' .. file.path,
-    model.theirs_lines,
-    file.path
-  )
-  prepare_source_buffer(
-    diffview,
-    panes.ours.buf,
-    'glance://merge/ours/' .. file.path,
-    model.ours_lines,
-    file.path
-  )
-  prepare_result_buffer(diffview, panes.result.buf, model.result_lines, file.path, model.result_ends_with_newline)
-
-  set_window_label(panes.theirs.win, role_label(model, layout.THEIRS_ROLE))
-  set_window_label(panes.ours.win, role_label(model, layout.OURS_ROLE))
-  set_window_label(panes.result.win, role_label(model, layout.RESULT_ROLE))
+function M.decorate(panes, model, active_conflict_index)
+  set_window_label(panes.theirs.win, role_label(model, layout.THEIRS_ROLE, active_conflict_index))
+  set_window_label(panes.ours.win, role_label(model, layout.OURS_ROLE, active_conflict_index))
+  set_window_label(panes.result.win, role_label(model, layout.RESULT_ROLE, active_conflict_index))
 
   decorate_sources({
     theirs = panes.theirs.buf,
     ours = panes.ours.buf,
     result = panes.result.buf,
-  }, model)
+  }, model, active_conflict_index)
+end
+
+function M.apply(diffview, panes, model, file, opts)
+  opts = opts or {}
+
+  if opts.refresh_sources ~= false then
+    prepare_source_buffer(
+      diffview,
+      panes.theirs.buf,
+      'glance://merge/theirs/' .. file.path,
+      model.theirs_lines,
+      file.path
+    )
+    prepare_source_buffer(
+      diffview,
+      panes.ours.buf,
+      'glance://merge/ours/' .. file.path,
+      model.ours_lines,
+      file.path
+    )
+  end
+
+  if opts.refresh_result ~= false then
+    prepare_result_buffer(diffview, panes.result.buf, model.result_lines, file.path, model.result_ends_with_newline)
+  end
+
+  M.decorate(panes, model, opts.active_conflict_index)
 end
 
 return M

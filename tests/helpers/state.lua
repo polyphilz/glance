@@ -165,6 +165,9 @@ function M.reset()
   end
 
   if ui then
+    if ui.separator_hover_key_ns then
+      pcall(vim.on_key, nil, ui.separator_hover_key_ns)
+    end
     ui.diff_open = false
     ui.welcome_buf = nil
     ui.welcome_win = nil
@@ -172,6 +175,9 @@ function M.reset()
     ui.starfield = nil
     ui.starfield_key = nil
     ui.separator_hover_win = nil
+    ui.separator_hover_targets = {}
+    ui.separator_hover_key_ns = nil
+    ui.separator_hover_pending = false
   end
 
   reset_loaded_modules()
