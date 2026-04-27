@@ -314,7 +314,8 @@ function M.request_refresh(opts)
     state.refresh_options = nil
     state.refresh_inflight = true
 
-    require('glance.git').get_status_snapshot_async(function(snapshot)
+    local git = require('glance.git')
+    git.get_status_snapshot_async(function(snapshot)
       if refresh_generation ~= state.refresh_generation then
         state.refresh_inflight = false
         return
@@ -340,7 +341,8 @@ function M.request_refresh(opts)
         end
 
         state.refresh_inflight = false
-        state.on_snapshot(snapshot, pending_opts)
+        local enriched_snapshot = git.enrich_status_snapshot(snapshot, { root = state.root })
+        state.on_snapshot(enriched_snapshot, pending_opts)
         sync_repo_watchers()
         finalize_repo_poll(true, pending_opts)
         if state.refresh_options ~= nil then
@@ -350,6 +352,7 @@ function M.request_refresh(opts)
     end, {
       root = state.root,
       schedule_callback = false,
+      enrich_conflicts = false,
     })
     return
   end

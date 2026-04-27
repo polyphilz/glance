@@ -832,6 +832,15 @@ function M.get_status_snapshot()
   })
 end
 
+function M.enrich_status_snapshot(snapshot, opts)
+  opts = opts or {}
+  snapshot = snapshot or {}
+  return build_status_snapshot(snapshot.output, snapshot.head_oid, {
+    root = opts.root,
+    index_signature = snapshot.index_signature,
+  })
+end
+
 function M.get_status_snapshot_async(callback, opts)
   opts = opts or {}
   local root = opts.root or M.repo_root()
@@ -869,6 +878,7 @@ function M.get_status_snapshot_async(callback, opts)
       deliver_status_snapshot(callback, output, head_oid, {
         root = root,
         schedule_callback = opts.schedule_callback,
+        enrich_conflicts = opts.enrich_conflicts,
       })
     end)
   end)

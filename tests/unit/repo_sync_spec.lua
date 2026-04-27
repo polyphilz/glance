@@ -203,6 +203,112 @@ return {
       end,
     },
     {
+      name = 'changed poll snapshots are enriched only after the fast key check',
+      run = function()
+        local config = require('glance.config')
+        local git = require('glance.git')
+        local repo_sync = require('glance.repo_sync')
+        local original_async_snapshot = git.get_status_snapshot_async
+        local original_enrich_snapshot = git.enrich_status_snapshot
+        local original_new_timer = vim.uv.new_timer
+        local original_new_fs_poll = vim.uv.new_fs_poll
+        local original_repo_watch_paths = git.repo_watch_paths
+        local fetch_opts = nil
+        local enrich_calls = 0
+        local handled = {}
+
+        config.setup({
+          watch = {
+            enabled = true,
+            poll = true,
+            interval_ms = 200,
+          },
+        })
+
+        local ok, err = xpcall(function()
+          git.get_status_snapshot_async = function(callback, opts)
+            fetch_opts = vim.deepcopy(opts)
+            callback({
+              key = 'changed',
+              output = 'UU renamed.txt\n',
+              head_oid = 'abc123',
+              index_signature = 'index-signature',
+              files = {
+                conflicts = {
+                  { path = 'renamed.txt', section = 'conflicts', kind = 'conflicted' },
+                },
+                staged = {},
+                changes = {},
+                untracked = {},
+              },
+            })
+          end
+
+          git.enrich_status_snapshot = function(snapshot, opts)
+            enrich_calls = enrich_calls + 1
+            A.equal(opts.root, '/tmp/glance-test-repo')
+            local enriched = vim.deepcopy(snapshot)
+            enriched.files.conflicts[1].conflict_class = 'rename_rename'
+            return enriched
+          end
+
+          vim.uv.new_timer = function()
+            local timer = {}
+
+            function timer:start()
+            end
+
+            function timer:stop()
+            end
+
+            function timer:close()
+            end
+
+            return timer
+          end
+
+          vim.uv.new_fs_poll = function()
+            return nil
+          end
+
+          git.repo_watch_paths = function()
+            return {}
+          end
+
+          start_repo_sync({
+            get_current_snapshot_key = function()
+              return 'old'
+            end,
+            on_snapshot = function(snapshot)
+              handled[#handled + 1] = snapshot
+            end,
+          })
+
+          repo_sync.request_refresh({ source = 'poll' })
+          vim.wait(100, function()
+            return #handled == 1
+          end)
+
+          A.equal(fetch_opts.root, '/tmp/glance-test-repo')
+          A.equal(fetch_opts.schedule_callback, false)
+          A.equal(fetch_opts.enrich_conflicts, false)
+          A.equal(enrich_calls, 1)
+          A.equal(handled[1].files.conflicts[1].conflict_class, 'rename_rename')
+        end, debug.traceback)
+
+        repo_sync.stop()
+        git.repo_watch_paths = original_repo_watch_paths
+        vim.uv.new_fs_poll = original_new_fs_poll
+        vim.uv.new_timer = original_new_timer
+        git.enrich_status_snapshot = original_enrich_snapshot
+        git.get_status_snapshot_async = original_async_snapshot
+
+        if not ok then
+          error(err)
+        end
+      end,
+    },
+    {
       name = 'scheduled repo refreshes fetch snapshots asynchronously and coalesce in flight requests',
       run = function()
         local git = require('glance.git')
