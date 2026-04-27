@@ -26,6 +26,7 @@ Launch a clean review UI for staged, unstaged, and untracked files without touch
 - Unified file tree workflow:
   - single file tree for staged, unstaged, untracked, and conflicted files
   - stage, unstage, or discard one file or the whole repo
+  - in-app 3-way merge editor for resolving conflicts
   - staged-change commit flow with a multi-line floating commit editor
   - read-only commit history browser launched from the file tree, with commit preview and hash copy
 - Lua config for theme, layout, keymaps, signs, refresh behavior, and more.
@@ -139,6 +140,8 @@ Default keys:
 | `D` | Discard all repo changes after confirmation |
 
 Pane navigation uses Neovim's built-in window commands by default, so `<C-w><Left>`, `<C-w><Right>`, `<C-w><Up>`, and `<C-w><Down>` work in Glance, along with `<C-w>h/j/k/l`.
+
+Conflicted text files open in a 3-way merge editor with `Theirs`, `Ours`, and editable `Result` panes. Press `?` in merge mode to see the actions available for the current conflict or file.
 
 Inside the git log modal, use `j` / `k` to move between commits, `<CR>` to preview the selected commit, `y` to copy the full hash, `r` to refresh, and `q` to go back or close.
 
@@ -303,9 +306,9 @@ Notes:
 Glance is still focused on the local review loop. Near-term work includes:
 
 - Hunk-level stage, unstage, and discard
-- Better coverage for renames, binary files, copied / type-changed entries, and conflicts
 - Filetree filtering and path search for larger changesets
 - File-scoped history, plus better commit-loop ergonomics like amend and fixup
+- Merge-editor polish such as optional base view, vertical layout, and smart-combine-style actions
 
 ## License
 
