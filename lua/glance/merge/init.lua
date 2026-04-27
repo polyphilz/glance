@@ -114,19 +114,35 @@ local function manual_unresolved_count()
   return count
 end
 
-local function conflict_index_for_result_line(line)
+local function conflict_contains_result_line(conflict, line)
+  if not conflict or not conflict.result_range then
+    return false
+  end
+
+  local start = conflict.result_range.start
+  local count = conflict.result_range.count
+  if count == 0 then
+    return line == start
+  end
+
+  return line >= start and line < (start + count)
+end
+
+local function conflict_index_for_result_line(line, preferred_index)
   if not state.model then
     return nil
+  end
+
+  if preferred_index and conflict_contains_result_line(state.model.conflicts[preferred_index], line) then
+    return preferred_index
   end
 
   for index, conflict in ipairs(state.model.conflicts) do
     local start = conflict.result_range.start
     local count = conflict.result_range.count
-    if count == 0 then
-      if line == start then
-        return index
-      end
-    elseif line >= start and line < (start + count) then
+    if count == 0 and line == start then
+      return index
+    elseif count > 0 and line >= start and line < (start + count) then
       return index
     end
   end
@@ -140,7 +156,7 @@ local function update_active_conflict_from_cursor(diffview)
     return state.active_conflict_index
   end
 
-  local index = conflict_index_for_result_line(vim.api.nvim_win_get_cursor(win)[1])
+  local index = conflict_index_for_result_line(vim.api.nvim_win_get_cursor(win)[1], state.active_conflict_index)
   if index then
     state.active_conflict_index = index
   end

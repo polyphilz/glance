@@ -385,6 +385,57 @@ return {
       end,
     },
     {
+      name = 'aligned zero-line conflicts preserve the navigated target',
+      run = function()
+        N.with_repo('repo_conflict_zero_line', function()
+          require('glance').start()
+          local ui = require('glance.ui')
+          local filetree = require('glance.filetree')
+          local diffview = require('glance.diffview')
+          local merge = require('glance.merge')
+          local merge_model = require('glance.merge.model')
+          local workspace = require('glance.workspace')
+
+          local original_build = merge_model.build
+          merge_model.build = function(...)
+            local built, err = original_build(...)
+            if not built then
+              return built, err
+            end
+
+            local duplicate = vim.deepcopy(built.conflicts[1])
+            duplicate.id = 2
+            built.conflicts[2] = duplicate
+            built.unresolved_count = 2
+            return built
+          end
+
+          local ok, err = xpcall(function()
+            ui.open_file(filetree.files.conflicts[1])
+
+            local result_buf = workspace.get_buf(diffview.workspace, 'merge_result')
+            local result_win = workspace.get_win(diffview.workspace, 'merge_result')
+            A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '1/2')
+
+            A.truthy(merge.jump_to_conflict(diffview, 2))
+            A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '2/2')
+
+            vim.api.nvim_exec_autocmds('CursorMoved', {
+              buffer = result_buf,
+              modeline = false,
+            })
+
+            A.contains(vim.api.nvim_get_option_value('winbar', { win = result_win }), '2/2')
+          end, debug.traceback)
+
+          merge_model.build = original_build
+          if not ok then
+            error(err, 0)
+          end
+        end)
+      end,
+    },
+    {
       name = 'merge writes preserve the clean result buffer while persisting unresolved marker form to disk',
       run = function()
         N.with_repo('repo_conflict_multi', function(repo)
