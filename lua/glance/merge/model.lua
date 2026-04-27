@@ -431,6 +431,17 @@ local function manual_outcome(conflict, state, lines)
   }
 end
 
+local function clean_match_outcome(state, lines)
+  return {
+    state = state,
+    current_lines = lines,
+    kind = 'manual',
+    display_lines = lines,
+    ours_handled = state == 'manual_resolved',
+    theirs_handled = state == 'manual_resolved',
+  }
+end
+
 local function outcome_key(outcome, next_cursor)
   return table.concat({
     outcome.state,
@@ -473,7 +484,7 @@ local function collect_outcomes_strict(conflict, current_lines, cursor, next_sta
 
   for _, candidate in ipairs(clean_candidates(conflict)) do
     if same_lines_at(current_lines, cursor, candidate.lines) then
-      add_outcome(manual_outcome(conflict, manual_state, candidate.lines), cursor + #candidate.lines)
+      add_outcome(clean_match_outcome(manual_state, candidate.lines), cursor + #candidate.lines)
     end
   end
 
@@ -637,7 +648,7 @@ local function collect_relaxed_occurrences(conflict, current_lines, cursor, mark
   for _, candidate in ipairs(clean_candidates(conflict)) do
     if #candidate.lines == 0 then
       for position = cursor, #current_lines + 1 do
-        local outcome = manual_outcome(conflict, manual_state, candidate.lines)
+        local outcome = clean_match_outcome(manual_state, candidate.lines)
         add_occurrence({
           state = outcome.state,
           current_lines = outcome.current_lines,
@@ -652,7 +663,7 @@ local function collect_relaxed_occurrences(conflict, current_lines, cursor, mark
     else
       for _, position in ipairs(find_sequence_positions(current_lines, candidate.lines, cursor)) do
         if not position_in_ranges(position, marker_ranges) then
-          local outcome = manual_outcome(conflict, manual_state, candidate.lines)
+          local outcome = clean_match_outcome(manual_state, candidate.lines)
           add_occurrence({
             state = outcome.state,
             current_lines = outcome.current_lines,
