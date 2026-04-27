@@ -1403,6 +1403,32 @@ return {
       end,
     },
     {
+      name = 'async snapshots preserve structural conflict enrichment without scheduled callbacks',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_conflict_rename_rename', function(repo)
+          local snapshot
+          git.get_status_snapshot_async(function(result)
+            snapshot = result
+          end, {
+            schedule_callback = false,
+          })
+
+          N.wait(1000, function()
+            return snapshot ~= nil
+          end, 'async status snapshot did not complete')
+
+          A.equal(#snapshot.files.conflicts, 1)
+          local file = snapshot.files.conflicts[1]
+          A.equal(file.path, repo.files.ours)
+          A.equal(file.old_path, repo.files.old)
+          A.equal(file.conflict_class, 'rename_rename')
+          A.same(file.conflict_paths, { repo.files.old, repo.files.ours, repo.files.theirs })
+        end)
+      end,
+    },
+    {
       name = 'integration completes special conflict choices through the index',
       run = function()
         local git = require('glance.git')

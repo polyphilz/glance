@@ -780,6 +780,20 @@ local function build_status_snapshot(output, head_oid, opts)
   }
 end
 
+local function deliver_status_snapshot(callback, output, head_oid, opts)
+  opts = opts or {}
+  local function deliver()
+    callback(build_status_snapshot(output, head_oid, opts))
+  end
+
+  if opts.schedule_callback == false and vim.in_fast_event() then
+    vim.schedule(deliver)
+    return
+  end
+
+  deliver()
+end
+
 local function empty_snapshot()
   return build_status_snapshot('', nil, {
     index_signature = '',
@@ -852,10 +866,10 @@ function M.get_status_snapshot_async(callback, opts)
         end
       end
 
-      callback(build_status_snapshot(output, head_oid, {
+      deliver_status_snapshot(callback, output, head_oid, {
         root = root,
-        enrich_conflicts = opts.schedule_callback ~= false,
-      }))
+        schedule_callback = opts.schedule_callback,
+      })
     end)
   end)
 end
