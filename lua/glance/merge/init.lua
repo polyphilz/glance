@@ -11,6 +11,8 @@ local workspace = require('glance.workspace')
 
 local M = {}
 
+local RESULT_SYNC_DEBOUNCE_MS = 120
+
 local state = {
   active = false,
   file = nil,
@@ -18,6 +20,8 @@ local state = {
   active_conflict_index = nil,
   write_in_progress = false,
   sync_in_progress = false,
+  result_sync_pending = false,
+  result_sync_token = 0,
 }
 
 local function panes(diffview)
@@ -110,19 +114,35 @@ local function manual_unresolved_count()
   return count
 end
 
-local function conflict_index_for_result_line(line)
+local function conflict_contains_result_line(conflict, line)
+  if not conflict or not conflict.result_range then
+    return false
+  end
+
+  local start = conflict.result_range.start
+  local count = conflict.result_range.count
+  if count == 0 then
+    return line == start
+  end
+
+  return line >= start and line < (start + count)
+end
+
+local function conflict_index_for_result_line(line, preferred_index)
   if not state.model then
     return nil
+  end
+
+  if preferred_index and conflict_contains_result_line(state.model.conflicts[preferred_index], line) then
+    return preferred_index
   end
 
   for index, conflict in ipairs(state.model.conflicts) do
     local start = conflict.result_range.start
     local count = conflict.result_range.count
-    if count == 0 then
-      if line == start then
-        return index
-      end
-    elseif line >= start and line < (start + count) then
+    if count == 0 and line == start then
+      return index
+    elseif count > 0 and line >= start and line < (start + count) then
       return index
     end
   end
@@ -136,7 +156,7 @@ local function update_active_conflict_from_cursor(diffview)
     return state.active_conflict_index
   end
 
-  local index = conflict_index_for_result_line(vim.api.nvim_win_get_cursor(win)[1])
+  local index = conflict_index_for_result_line(vim.api.nvim_win_get_cursor(win)[1], state.active_conflict_index)
   if index then
     state.active_conflict_index = index
   end
@@ -161,12 +181,6 @@ local function focus_result(diffview)
 
   vim.api.nvim_set_current_win(win)
   return true
-end
-
-local function write_text(path, text)
-  local file = assert(io.open(path, 'w'))
-  file:write(text or '')
-  file:close()
 end
 
 local function confirm_action(message, accept_label)
@@ -281,6 +295,43 @@ local function edit_result_buffer(diffview, file)
   return buf
 end
 
+local function set_buffer_lines_for_write(buf, lines, ends_with_newline)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or {})
+  vim.api.nvim_set_option_value('endofline', ends_with_newline ~= false, { buf = buf })
+end
+
+local function write_prepared_result(buf, prepared, visible_lines, visible_ends_with_newline)
+  local persisted_ends_with_newline = prepared.model and prepared.model.current_ends_with_newline
+  local previous_fixendofline = vim.api.nvim_get_option_value('fixendofline', { buf = buf })
+
+  state.sync_in_progress = true
+  local ok, err = xpcall(function()
+    set_buffer_lines_for_write(buf, prepared.persisted_lines, persisted_ends_with_newline)
+    if persisted_ends_with_newline == false then
+      vim.api.nvim_set_option_value('fixendofline', false, { buf = buf })
+    end
+
+    vim.api.nvim_buf_call(buf, function()
+      vim.cmd('silent noautocmd write')
+    end)
+  end, debug.traceback)
+
+  local restore_ok, restore_err = pcall(function()
+    vim.api.nvim_set_option_value('fixendofline', previous_fixendofline, { buf = buf })
+    set_buffer_lines_for_write(buf, visible_lines, visible_ends_with_newline)
+    vim.api.nvim_set_option_value('modified', not ok, { buf = buf })
+  end)
+  state.sync_in_progress = false
+
+  if not ok then
+    return false, err
+  end
+  if not restore_ok then
+    return false, restore_err
+  end
+  return true
+end
+
 local function bind_write_command(diffview, file)
   local buf = result_buf(diffview)
   if not buf then
@@ -295,15 +346,15 @@ local function bind_write_command(diffview, file)
         return
       end
 
-      local root = git.repo_root()
-      if not root then
+      if not git.repo_root() then
         vim.notify('glance: not inside a git repository', vim.log.levels.WARN)
         return
       end
 
       local current_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local current_ends_with_newline = vim.api.nvim_get_option_value('endofline', { buf = buf })
       local prepared, err = model.prepare_write(file, current_lines, {
-        current_ends_with_newline = vim.api.nvim_get_option_value('endofline', { buf = buf }),
+        current_ends_with_newline = current_ends_with_newline,
         previous_model = state.model,
       })
       if not prepared then
@@ -313,8 +364,10 @@ local function bind_write_command(diffview, file)
 
       state.write_in_progress = true
       local ok, write_err = xpcall(function()
-        write_text(root .. '/' .. file.path, prepared.persisted_text)
-        vim.api.nvim_set_option_value('modified', false, { buf = buf })
+        local wrote, write_result_err = write_prepared_result(buf, prepared, current_lines, current_ends_with_newline)
+        if not wrote then
+          error(write_result_err)
+        end
         filetree.note_repo_activity()
         M.refresh(diffview, file)
       end, debug.traceback)
@@ -355,6 +408,64 @@ local function sync_from_result_buffer(diffview, file, previous_model)
   update_active_conflict_from_cursor(diffview)
   refresh_decorations(diffview)
   return merge_model
+end
+
+local function cancel_result_sync()
+  state.result_sync_token = state.result_sync_token + 1
+  state.result_sync_pending = false
+end
+
+local function run_result_sync(diffview, file)
+  if state.write_in_progress or state.sync_in_progress then
+    return true
+  end
+  if not state.active or not file or not state.file or state.file.path ~= file.path then
+    return true
+  end
+
+  local previous_model = state.model
+  local merge_model, err = sync_from_result_buffer(diffview, file, previous_model)
+  if not merge_model then
+    state.model = previous_model
+    return false, err
+  end
+
+  return true
+end
+
+local function schedule_result_sync(diffview, file)
+  state.result_sync_token = state.result_sync_token + 1
+  state.result_sync_pending = true
+  local token = state.result_sync_token
+
+  vim.defer_fn(function()
+    if token ~= state.result_sync_token or not state.result_sync_pending then
+      return
+    end
+
+    state.result_sync_pending = false
+    run_result_sync(diffview, file)
+  end, RESULT_SYNC_DEBOUNCE_MS)
+end
+
+local function flush_result_sync(diffview)
+  if not state.result_sync_pending then
+    return true
+  end
+
+  local file = state.file
+  cancel_result_sync()
+  return run_result_sync(diffview, file)
+end
+
+local function flush_result_sync_or_notify(diffview)
+  local synced, sync_err = flush_result_sync(diffview)
+  if not synced then
+    vim.notify('glance: failed to refresh merge state: ' .. tostring(sync_err), vim.log.levels.WARN)
+    return false
+  end
+
+  return true
 end
 
 local function apply_action(diffview, action)
@@ -475,6 +586,10 @@ local function write_result_if_modified(diffview)
 end
 
 local function handle_action_keymap(diffview, action)
+  if not flush_result_sync_or_notify(diffview) then
+    return
+  end
+
   if action == 'show_help' then
     help.toggle({
       kind = 'text',
@@ -559,11 +674,7 @@ local function bind_result_tracking(diffview, file)
         return
       end
 
-      local previous_model = state.model
-      local merge_model = sync_from_result_buffer(diffview, file, previous_model)
-      if not merge_model then
-        state.model = previous_model
-      end
+      schedule_result_sync(diffview, file)
     end,
   })
 
@@ -610,6 +721,10 @@ function M.jump_to_conflict(diffview, index)
 end
 
 function M.jump_next(diffview)
+  if not flush_result_sync_or_notify(diffview) then
+    return false
+  end
+
   local unresolved = unresolved_indices()
   if #unresolved == 0 then
     return false
@@ -632,6 +747,10 @@ function M.jump_next(diffview)
 end
 
 function M.jump_prev(diffview)
+  if not flush_result_sync_or_notify(diffview) then
+    return false
+  end
+
   local unresolved = unresolved_indices()
   if #unresolved == 0 then
     return false
@@ -697,6 +816,8 @@ local function rebuild(diffview, file, existing_model)
 end
 
 function M.open(diffview, file)
+  cancel_result_sync()
+
   local info = git.get_conflict_info(file)
   if special.open(diffview, file, info) then
     state.active = false
@@ -851,12 +972,14 @@ function M.complete(diffview)
 end
 
 function M.reset()
+  cancel_result_sync()
   state.active = false
   state.file = nil
   state.model = nil
   state.active_conflict_index = nil
   state.write_in_progress = false
   state.sync_in_progress = false
+  state.result_sync_pending = false
   help.close()
   special.reset()
 end

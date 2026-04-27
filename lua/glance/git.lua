@@ -535,6 +535,97 @@ local function path_has_conflict_entry(conflict_files, path)
   return false
 end
 
+local function sort_stage_entries_by_path(entries)
+  table.sort(entries, function(left, right)
+    if left.path == right.path then
+      return left.stage < right.stage
+    end
+    return tostring(left.path) < tostring(right.path)
+  end)
+  return entries
+end
+
+local function structural_orphan_entries(unmerged_entries, by_path, stage)
+  local entries = {}
+  for _, entry in ipairs(unmerged_entries or {}) do
+    if entry.stage == stage
+      and by_path[entry.path]
+      and not by_path[entry.path][1]
+    then
+      entries[#entries + 1] = entry
+    end
+  end
+  return sort_stage_entries_by_path(entries)
+end
+
+local function structural_pair_score(base_entry, candidate_entry)
+  if base_entry.oid == candidate_entry.oid then
+    return 1000
+  end
+  return 0
+end
+
+local function pair_structural_candidates(base_entries, candidate_entries)
+  local pairs = {}
+  local used_bases = {}
+  local used_candidates = {}
+  local scored = {}
+
+  for base_index, base_entry in ipairs(base_entries or {}) do
+    for candidate_index, candidate_entry in ipairs(candidate_entries or {}) do
+      local score = structural_pair_score(base_entry, candidate_entry)
+      if score > 0 then
+        scored[#scored + 1] = {
+          score = score,
+          base_index = base_index,
+          candidate_index = candidate_index,
+          base_entry = base_entry,
+          candidate_entry = candidate_entry,
+        }
+      end
+    end
+  end
+
+  table.sort(scored, function(left, right)
+    if left.score ~= right.score then
+      return left.score > right.score
+    end
+    if left.base_entry.path ~= right.base_entry.path then
+      return left.base_entry.path < right.base_entry.path
+    end
+    return left.candidate_entry.path < right.candidate_entry.path
+  end)
+
+  for _, item in ipairs(scored) do
+    if not used_bases[item.base_index] and not used_candidates[item.candidate_index] then
+      pairs[item.base_entry.path] = item.candidate_entry.path
+      used_bases[item.base_index] = true
+      used_candidates[item.candidate_index] = true
+    end
+  end
+
+  local remaining_bases = {}
+  local remaining_candidates = {}
+  for index, entry in ipairs(base_entries or {}) do
+    if not used_bases[index] then
+      remaining_bases[#remaining_bases + 1] = entry
+    end
+  end
+  for index, entry in ipairs(candidate_entries or {}) do
+    if not used_candidates[index] then
+      remaining_candidates[#remaining_candidates + 1] = entry
+    end
+  end
+
+  -- Some tests synthesize rename conflicts with completely rewritten blobs.
+  -- Pair leftovers one-to-one so a candidate can never be cross-wired into every base group.
+  for index = 1, math.min(#remaining_bases, #remaining_candidates) do
+    pairs[remaining_bases[index].path] = remaining_candidates[index].path
+  end
+
+  return pairs
+end
+
 --- Parse `git status --porcelain=v1` into raw entries.
 --- @param output string
 --- @return table[]
@@ -689,6 +780,20 @@ local function build_status_snapshot(output, head_oid, opts)
   }
 end
 
+local function deliver_status_snapshot(callback, output, head_oid, opts)
+  opts = opts or {}
+  local function deliver()
+    callback(build_status_snapshot(output, head_oid, opts))
+  end
+
+  if opts.schedule_callback == false and vim.in_fast_event() then
+    vim.schedule(deliver)
+    return
+  end
+
+  deliver()
+end
+
 local function empty_snapshot()
   return build_status_snapshot('', nil, {
     index_signature = '',
@@ -761,10 +866,10 @@ function M.get_status_snapshot_async(callback, opts)
         end
       end
 
-      callback(build_status_snapshot(output, head_oid, {
+      deliver_status_snapshot(callback, output, head_oid, {
         root = root,
-        enrich_conflicts = opts.schedule_callback ~= false,
-      }))
+        schedule_callback = opts.schedule_callback,
+      })
     end)
   end)
 end
@@ -942,25 +1047,26 @@ local function structural_conflict_groups(conflict_files, unmerged_entries)
   local by_path = entries_by_path(unmerged_entries)
   local groups = {}
   local grouped_paths = {}
-  local stage1_paths = {}
+  local stage1_entries = {}
 
   for _, entry in ipairs(unmerged_entries or {}) do
     if entry.stage == 1 and not (by_path[entry.path] and (by_path[entry.path][2] or by_path[entry.path][3])) then
-      stage1_paths[#stage1_paths + 1] = entry.path
+      stage1_entries[#stage1_entries + 1] = entry
     end
   end
 
-  table.sort(stage1_paths)
-  for _, base_path in ipairs(stage1_paths) do
+  sort_stage_entries_by_path(stage1_entries)
+  local stage2_pairs = pair_structural_candidates(stage1_entries, structural_orphan_entries(unmerged_entries, by_path, 2))
+  local stage3_pairs = pair_structural_candidates(stage1_entries, structural_orphan_entries(unmerged_entries, by_path, 3))
+
+  for _, base_entry in ipairs(stage1_entries) do
+    local base_path = base_entry.path
     local paths = { base_path }
-    for _, entry in ipairs(unmerged_entries or {}) do
-      if entry.path ~= base_path
-        and (entry.stage == 2 or entry.stage == 3)
-        and by_path[entry.path]
-        and not by_path[entry.path][1]
-      then
-        paths[#paths + 1] = entry.path
-      end
+    if stage2_pairs[base_path] then
+      paths[#paths + 1] = stage2_pairs[base_path]
+    end
+    if stage3_pairs[base_path] and stage3_pairs[base_path] ~= stage2_pairs[base_path] then
+      paths[#paths + 1] = stage3_pairs[base_path]
     end
 
     if #paths > 1 then

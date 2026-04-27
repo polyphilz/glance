@@ -47,6 +47,19 @@ return {
       end,
     },
     {
+      name = 'downsample keeps unresolved merge conflicts above handled conflicts',
+      run = function()
+        local logic = require('glance.minimap_logic')
+
+        local pixels = logic.downsample({
+          [1] = logic.states.MERGE_HANDLED,
+          [2] = logic.states.MERGE_UNRESOLVED,
+        }, 2, 1)
+
+        A.same(pixels, { logic.states.MERGE_UNRESOLVED })
+      end,
+    },
+    {
       name = 'viewport and cursor pixels stay in bounds',
       run = function()
         local logic = require('glance.minimap_logic')

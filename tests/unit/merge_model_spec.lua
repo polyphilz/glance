@@ -73,6 +73,44 @@ return {
       end,
     },
     {
+      name = 'build keeps clean candidate lines that look like markers resolved',
+      run = function()
+        N.with_repo('repo_no_changes', function(repo)
+          local git = require('glance.git')
+          local merge_model = require('glance.merge.model')
+          local main_branch = vim.trim(repo:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+          repo:git({ 'checkout', '-b', 'feature' })
+          repo:write(repo.files.tracked, 'feature\n')
+          repo:commit_all('Feature change')
+
+          repo:git({ 'checkout', main_branch })
+          repo:write(repo.files.tracked, '<<<<<<< literal\n')
+          repo:commit_all('Main marker-like literal')
+
+          local ok = pcall(function()
+            repo:git({ 'merge', 'feature' })
+          end)
+          A.falsy(ok)
+
+          local file = git.get_changed_files().conflicts[1]
+          repo:write(repo.files.tracked, '<<<<<<< literal\n')
+
+          local built = assert(merge_model.build(file))
+          A.equal(built.unresolved_count, 0)
+          A.equal(built.conflicts[1].state, 'manual_resolved')
+          A.truthy(built.conflicts[1].handled)
+          A.same(built.result_lines, { '<<<<<<< literal' })
+
+          local prepared = assert(merge_model.prepare_write(file, { '<<<<<<< literal' }, {
+            previous_model = built,
+          }))
+          A.equal(prepared.model.conflicts[1].state, 'manual_resolved')
+          A.same(prepared.persisted_lines, { '<<<<<<< literal' })
+        end)
+      end,
+    },
+    {
       name = 'build keeps mixed manual_resolved and unresolved conflicts in order',
       run = function()
         N.with_repo('repo_conflict_multi', function(repo)

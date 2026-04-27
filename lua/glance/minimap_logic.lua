@@ -12,6 +12,22 @@ M.states = {
   MERGE_ACTIVE = 8,
 }
 
+local STATE_PRIORITY = {
+  [M.states.NONE] = 0,
+  [M.states.ADD] = 1,
+  [M.states.DELETE] = 2,
+  [M.states.MERGE_HANDLED] = 3,
+  [M.states.MERGE_UNRESOLVED] = 4,
+  [M.states.MERGE_MANUAL] = 5,
+  [M.states.CHANGE] = 6,
+  [M.states.CURSOR] = 7,
+  [M.states.MERGE_ACTIVE] = 8,
+}
+
+local function higher_priority(left, right)
+  return (STATE_PRIORITY[left] or 0) > (STATE_PRIORITY[right] or 0)
+end
+
 --- Extract diff regions from old_lines vs new_lines using vim.diff().
 --- Returns a sparse table: line_types[lnum] = ADD|DELETE|CHANGE or nil.
 --- @param old_lines string[]
@@ -119,13 +135,8 @@ function M.downsample(line_types, total_lines, pixel_count)
     local best = M.states.NONE
     for lnum = src_start, math.min(src_end, total_lines) do
       local state = line_types[lnum]
-      if state then
-        if state == M.states.CHANGE then
-          best = M.states.CHANGE
-          break
-        elseif state > best then
-          best = state
-        end
+      if state and higher_priority(state, best) then
+        best = state
       end
     end
     pixels[i] = best

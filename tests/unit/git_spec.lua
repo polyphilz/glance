@@ -1360,6 +1360,75 @@ return {
       end,
     },
     {
+      name = 'integration keeps multiple structural conflict groups separate',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_no_changes', function(repo)
+          local old_a = 'base-a.txt'
+          local old_b = 'base-b.txt'
+          local renamed_a = 'z-renamed-a.txt'
+          local renamed_b = 'a-renamed-b.txt'
+          local oid_a = repo:hash_blob('base a\n')
+          local oid_b = repo:hash_blob('base b\n')
+
+          repo:write(old_a, 'base a\n')
+          repo:write(old_b, 'base b\n')
+          repo:stage(old_a, old_b)
+          repo:git({ 'commit', '-m', 'Seed structural conflicts' })
+          repo:git({ 'rm', '-q', '--cached', '--', old_a, old_b })
+          repo:update_index_info({
+            { mode = '100644', oid = oid_a, stage = 1, path = old_a },
+            { mode = '100644', oid = oid_b, stage = 1, path = old_b },
+            { mode = '100644', oid = oid_b, stage = 2, path = renamed_b },
+            { mode = '100644', oid = oid_a, stage = 2, path = renamed_a },
+          })
+
+          local changed = git.get_changed_files()
+          A.equal(#changed.conflicts, 2)
+
+          local by_old_path = {}
+          for _, file in ipairs(changed.conflicts) do
+            by_old_path[file.old_path] = file
+          end
+
+          A.equal(by_old_path[old_a].path, renamed_a)
+          A.equal(by_old_path[old_a].conflict_class, 'rename_delete')
+          A.same(by_old_path[old_a].conflict_paths, { old_a, renamed_a })
+
+          A.equal(by_old_path[old_b].path, renamed_b)
+          A.equal(by_old_path[old_b].conflict_class, 'rename_delete')
+          A.same(by_old_path[old_b].conflict_paths, { renamed_b, old_b })
+        end)
+      end,
+    },
+    {
+      name = 'async snapshots preserve structural conflict enrichment without scheduled callbacks',
+      run = function()
+        local git = require('glance.git')
+
+        N.with_repo('repo_conflict_rename_rename', function(repo)
+          local snapshot
+          git.get_status_snapshot_async(function(result)
+            snapshot = result
+          end, {
+            schedule_callback = false,
+          })
+
+          N.wait(1000, function()
+            return snapshot ~= nil
+          end, 'async status snapshot did not complete')
+
+          A.equal(#snapshot.files.conflicts, 1)
+          local file = snapshot.files.conflicts[1]
+          A.equal(file.path, repo.files.ours)
+          A.equal(file.old_path, repo.files.old)
+          A.equal(file.conflict_class, 'rename_rename')
+          A.same(file.conflict_paths, { repo.files.old, repo.files.ours, repo.files.theirs })
+        end)
+      end,
+    },
+    {
       name = 'integration completes special conflict choices through the index',
       run = function()
         local git = require('glance.git')
