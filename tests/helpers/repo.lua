@@ -293,6 +293,38 @@ function scenarios.repo_conflict_noeol(fixture)
   assert(not ok, 'expected merge conflict fixture without trailing newline')
 end
 
+function scenarios.repo_conflict_zero_line(fixture)
+  seed_committed_file(fixture, 'tracked.txt', table.concat({
+    'alpha',
+    'omega',
+    '',
+  }, '\n'))
+  local main_branch = vim.trim(fixture:git({ 'rev-parse', '--abbrev-ref', 'HEAD' }))
+
+  fixture:git({ 'checkout', '-b', 'feature' })
+  fixture:write(fixture.files.tracked, table.concat({
+    'alpha',
+    'feature insert',
+    'omega',
+    '',
+  }, '\n'))
+  fixture:commit_all('Feature inserts between stable lines')
+
+  fixture:git({ 'checkout', main_branch })
+  fixture:write(fixture.files.tracked, table.concat({
+    'alpha',
+    'main insert',
+    'omega',
+    '',
+  }, '\n'))
+  fixture:commit_all('Main inserts between stable lines')
+
+  local ok = pcall(function()
+    fixture:git({ 'merge', 'feature' })
+  end)
+  assert(not ok, 'expected zero-line merge conflict fixture')
+end
+
 function scenarios.repo_type_change(fixture)
   seed_committed_file(fixture, 'tracked.txt', 'alpha\nbeta\ngamma\n')
   fixture:remove(fixture.files.tracked)
