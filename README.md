@@ -2,9 +2,7 @@
 
 <img src="assets/readme/dist/glance-hero-stars.gif" width="640" alt="Animated glance hero">
 
-A standalone Git diff review TUI powered by Neovim.
-
-Launch a clean review UI for staged, unstaged, and untracked files without touching your existing Neovim setup.
+Glance is a standalone Git diff review TUI built on [Neovim](https://github.com/neovim/neovim).
 
 <a href="https://github.com/polyphilz/glance/actions/workflows/ci.yaml" target="_blank"><img src="https://github.com/polyphilz/glance/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
 <a href="https://www.apple.com/macos/" target="_blank"><img src="https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white" alt="macOS"></a>
