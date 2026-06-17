@@ -7,3 +7,4 @@ nvim.log
 **/.venv/
 **/__pycache__/
 assets/misc/
+launch/
